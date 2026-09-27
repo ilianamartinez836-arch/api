@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>UniversalOverlay Scripting API</title></head>
+<body>
+<h1>UniversalOverlay Scripting API</h1>
+<p>Complete reference of the Lua scripting API: globals, callback registries, all bound functions and the pointer metatable.</p>
+<h2>Table of Contents</h2>
+<ul>
+<li><a href="#globals">Lua Globals</a></li>
+<li><a href="#callbacks">Callback Registration</a></li>
+<li><a href="#ser">ser table</a></li>
+<li><a href="#imgui">imgui table</a></li>
+<li><a href="#mem">mem table</a></li>
+<li><a href="#ptr">Pointer metatable</a></li>
+<li><a href="#counts">Counts</a></li>
+</ul>
+<h2 id="globals">Lua Globals</h2>
+<table border="1">
+<tr><th>Name</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>ser</code></td><td>table</td><td>Script engine control table.</td></tr>
+<tr><td><code>imgui</code></td><td>table</td><td>Dear ImGui widget/draw table.</td></tr>
+<tr><td><code>mem</code></td><td>table</td><td>Memory read/write/scan helpers (also ser.mem).</td></tr>
+<tr><td><code>print</code></td><td>function</td><td>Tab-join arguments, write to console and log.</td></tr>
+<tr><td><code>SER_FRAME_CALLBACKS</code></td><td>table</td><td>Frame callbacks keyed by integer token.</td></tr>
+<tr><td><code>SER_NEXT_TOKEN</code></td><td>integer</td><td>Next frame callback token.</td></tr>
+<tr><td><code>SER_UNLOAD_CALLBACKS</code></td><td>table</td><td>Unload callbacks keyed by integer token.</td></tr>
+<tr><td><code>SER_UNLOAD_TOKEN</code></td><td>integer</td><td>Next unload callback token.</td></tr>
+<tr><td><code>SER_SCRIPT_DIR</code></td><td>string</td><td>UTF-8 scripts directory path.</td></tr>
+</table>
+<h2 id="callbacks">Callback Registration</h2>
+<table border="1">
+<tr><th>Lua call</th><th>C++ function</th><th>Description</th></tr>
+<tr><td><code>ser.on_frame(fn) -&gt; token</code></td><td><code>l_on_frame</code></td><td>Register fn in SER_FRAME_CALLBACKS; returns token.</td></tr>
+<tr><td><code>ser.off_frame(token)</code></td><td><code>l_off_frame</code></td><td>Remove frame callback by token.</td></tr>
+<tr><td><code>ser.on_unload(fn) -&gt; token</code></td><td><code>l_on_unload</code></td><td>Register fn in SER_UNLOAD_CALLBACKS; returns token.</td></tr>
+<tr><td><code>ser.off_unload(token)</code></td><td><code>l_off_unload</code></td><td>Remove unload callback by token.</td></tr>
+</table>
+<h2 id="ser">ser table bindings</h2>
+<table border="1">
+<tr><th>Lua name</th><th>C++ function</th><th>C++ signature</th></tr>
+<tr><td><code>ser.api</code></td><td><code>l_api</code></td><td><code>int l_api(lua_State* L)</code></td></tr>
+<tr><td><code>ser.pdevice</code></td><td><code>l_device</code></td><td><code>int l_device(lua_State* L)</code></td></tr>
+<tr><td><code>ser.device_context</code></td><td><code>l_device_context</code></td><td><code>int l_device_context(lua_State* L)</code></td></tr>
+<tr><td><code>ser.swapchain</code></td><td><code>l_swapchain</code></td><td><code>int l_swapchain(lua_State* L)</code></td></tr>
+<tr><td><code>ser.command_queue</code></td><td><code>l_command_queue</code></td><td><code>int l_command_queue(lua_State* L)</code></td></tr>
+<tr><td><code>ser.hwnd</code></td><td><code>l_hwnd</code></td><td><code>int l_hwnd(lua_State* L)</code></td></tr>
+<tr><td><code>ser.steam_overlay</code></td><td><code>l_steam</code></td><td><code>int l_steam(lua_State* L)</code></td></tr>
+<tr><td><code>ser.ready</code></td><td><code>l_ready</code></td><td><code>int l_ready(lua_State* L)</code></td></tr>
+<tr><td><code>ser.log</code></td><td><code>l_log</code></td><td><code>int l_log(lua_State* L)</code></td></tr>
+<tr><td><code>ser.print</code></td><td><code>l_print</code></td><td><code>int l_print(lua_State* L)</code></td></tr>
+<tr><td><code>ser.on_frame</code></td><td><code>l_on_frame</code></td><td><code>int l_on_frame(lua_State* L)</code></td></tr>
+<tr><td><code>ser.off_frame</code></td><td><code>l_off_frame</code></td><td><code>int l_off_frame(lua_State* L)</code></td></tr>
+<tr><td><code>ser.on_unload</code></td><td><code>l_on_unload</code></td><td><code>int l_on_unload(lua_State* L)</code></td></tr>
+<tr><td><code>ser.off_unload</code></td><td><code>l_off_unload</code></td><td><code>int l_off_unload(lua_State* L)</code></td></tr>
+<tr><td><code>ser.visible</code></td><td><code>l_visible</code></td><td><code>int l_visible(lua_State* L)</code></td></tr>
+<tr><td><code>ser.set_visible</code></td><td><code>l_set_visible</code></td><td><code>int l_set_visible(lua_State* L)</code></td></tr>
+<tr><td><code>ser.console_visible</code></td><td><code>l_console_visible</code></td><td><code>int l_console_visible(lua_State* L)</code></td></tr>
+<tr><td><code>ser.set_console_visible</code></td><td><code>l_set_console_visible</code></td><td><code>int l_set_console_visible(lua_State* L)</code></td></tr>
+<tr><td><code>ser.set_toggle_key</code></td><td><code>l_set_toggle_key</code></td><td><code>int l_set_toggle_key(lua_State* L)</code></td></tr>
+<tr><td><code>ser.get_toggle_key</code></td><td><code>l_get_toggle_key</code></td><td><code>int l_get_toggle_key(lua_State* L)</code></td></tr>
+<tr><td><code>ser.load_texture</code></td><td><code>l_load_texture</code></td><td><code>int l_load_texture(lua_State* L)</code></td></tr>
+<tr><td><code>ser.free_texture</code></td><td><code>l_free_texture</code></td><td><code>int l_free_texture(lua_State* L)</code></td></tr>
+<tr><td><code>ser.texture_size</code></td><td><code>l_texture_size</code></td><td><code>int l_texture_size(lua_State* L)</code></td></tr>
+<tr><td><code>ser.load_script</code></td><td><code>l_load_script</code></td><td><code>int l_load_script(lua_State* L)</code></td></tr>
+<tr><td><code>ser.stop_script</code></td><td><code>l_stop_script</code></td><td><code>int l_stop_script(lua_State* L)</code></td></tr>
+<tr><td><code>ser.scripts</code></td><td><code>l_scripts</code></td><td><code>int l_scripts(lua_State* L)</code></td></tr>
+<tr><td><code>ser.loaded_scripts</code></td><td><code>l_loaded_scripts</code></td><td><code>int l_loaded_scripts(lua_State* L)</code></td></tr>
+<tr><td><code>ser.scripts_dir</code></td><td><code>l_scripts_dir</code></td><td><code>int l_scripts_dir(lua_State* L)</code></td></tr>
+<tr><td><code>ser.set_scripts_dir</code></td><td><code>l_set_scripts_dir</code></td><td><code>int l_set_scripts_dir(lua_State* L)</code></td></tr>
+</table>
+<h2 id="imgui">imgui table bindings</h2>
+<table border="1">
+<tr><th>Lua name</th><th>C++ function</th><th>C++ signature</th></tr>
+<tr><td><code>imgui.Begin</code></td><td><code>i_begin</code></td><td><code>int i_begin(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.End</code></td><td><code>i_end</code></td><td><code>int i_end(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Window</code></td><td><code>i_window</code></td><td><code>int i_window(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginChild</code></td><td><code>i_begin_child</code></td><td><code>int i_begin_child(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndChild</code></td><td><code>i_end_child</code></td><td><code>int i_end_child(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Text</code></td><td><code>i_text</code></td><td><code>int i_text(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TextDisabled</code></td><td><code>i_text_disabled</code></td><td><code>int i_text_disabled(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TextWrapped</code></td><td><code>i_text_wrapped</code></td><td><code>int i_text_wrapped(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TextColored</code></td><td><code>i_text_colored</code></td><td><code>int i_text_colored(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Separator</code></td><td><code>i_separator</code></td><td><code>int i_separator(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SameLine</code></td><td><code>i_same_line</code></td><td><code>int i_same_line(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.NewLine</code></td><td><code>i_new_line</code></td><td><code>int i_new_line(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Spacing</code></td><td><code>i_spacing</code></td><td><code>int i_spacing(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Indent</code></td><td><code>i_indent</code></td><td><code>int i_indent(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Unindent</code></td><td><code>i_unindent</code></td><td><code>int i_unindent(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Button</code></td><td><code>i_button</code></td><td><code>int i_button(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SmallButton</code></td><td><code>i_small_button</code></td><td><code>int i_small_button(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Checkbox</code></td><td><code>i_checkbox</code></td><td><code>int i_checkbox(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SliderFloat</code></td><td><code>i_slider_float</code></td><td><code>int i_slider_float(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SliderInt</code></td><td><code>i_slider_int</code></td><td><code>int i_slider_int(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.InputFloat</code></td><td><code>i_input_float</code></td><td><code>int i_input_float(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.InputInt</code></td><td><code>i_input_int</code></td><td><code>int i_input_int(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Combo</code></td><td><code>i_combo</code></td><td><code>int i_combo(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TreeNode</code></td><td><code>i_tree_node</code></td><td><code>int i_tree_node(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TreePop</code></td><td><code>i_tree_pop</code></td><td><code>int i_tree_pop(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.CollapsingHeader</code></td><td><code>i_collapsing_header</code></td><td><code>int i_collapsing_header(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.ProgressBar</code></td><td><code>i_progress_bar</code></td><td><code>int i_progress_bar(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetNextWindowPos</code></td><td><code>i_set_next_window_pos</code></td><td><code>int i_set_next_window_pos(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetNextWindowSize</code></td><td><code>i_set_next_window_size</code></td><td><code>int i_set_next_window_size(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.WindowFontScale</code></td><td><code>i_window_font_scale</code></td><td><code>int i_window_font_scale(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.FontScale</code></td><td><code>i_font_scale</code></td><td><code>int i_font_scale(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.CalcTextSize</code></td><td><code>i_calc_text_size</code></td><td><code>int i_calc_text_size(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Image</code></td><td><code>i_image</code></td><td><code>int i_image(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.FontTexture</code></td><td><code>i_font_texture</code></td><td><code>int i_font_texture(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.FG_Rect</code></td><td><code>i_fg_rect_filled</code></td><td><code>int i_fg_rect_filled(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.FG_Text</code></td><td><code>i_fg_text</code></td><td><code>int i_fg_text(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.FG_Line</code></td><td><code>i_fg_line</code></td><td><code>int i_fg_line(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.FG_Circle</code></td><td><code>i_fg_circle</code></td><td><code>int i_fg_circle(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.FG_TriFilled</code></td><td><code>i_fg_tri_filled</code></td><td><code>int i_fg_tri_filled(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.FG_Image</code></td><td><code>i_fg_image</code></td><td><code>int i_fg_image(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BG_Rect</code></td><td><code>i_bg_rect</code></td><td><code>int i_bg_rect(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BG_RectOutline</code></td><td><code>i_bg_rect_outline</code></td><td><code>int i_bg_rect_outline(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BG_Text</code></td><td><code>i_bg_text</code></td><td><code>int i_bg_text(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BG_Line</code></td><td><code>i_bg_line</code></td><td><code>int i_bg_line(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BG_Circle</code></td><td><code>i_bg_circle</code></td><td><code>int i_bg_circle(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BG_TriFilled</code></td><td><code>i_bg_tri_filled</code></td><td><code>int i_bg_tri_filled(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BG_Image</code></td><td><code>i_bg_image</code></td><td><code>int i_bg_image(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.WDL_Rect</code></td><td><code>i_wdl_rect</code></td><td><code>int i_wdl_rect(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.WDL_Text</code></td><td><code>i_wdl_text</code></td><td><code>int i_wdl_text(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.WDL_Line</code></td><td><code>i_wdl_line</code></td><td><code>int i_wdl_line(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.WDL_Circle</code></td><td><code>i_wdl_circle</code></td><td><code>int i_wdl_circle(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.WDL_TriFilled</code></td><td><code>i_wdl_tri_filled</code></td><td><code>int i_wdl_tri_filled(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.WDL_Image</code></td><td><code>i_wdl_image</code></td><td><code>int i_wdl_image(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.StyleColors</code></td><td><code>i_style_colors</code></td><td><code>int i_style_colors(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetStyleColor</code></td><td><code>i_set_style_color</code></td><td><code>int i_set_style_color(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.ResetStyle</code></td><td><code>i_reset_style</code></td><td><code>int i_reset_style(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.PushStyleColor</code></td><td><code>i_push_style_color</code></td><td><code>int i_push_style_color(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.PopStyleColor</code></td><td><code>i_pop_style_color</code></td><td><code>int i_pop_style_color(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.PushStyleVar</code></td><td><code>i_push_style_var</code></td><td><code>int i_push_style_var(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.PopStyleVar</code></td><td><code>i_pop_style_var</code></td><td><code>int i_pop_style_var(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetStyleVar</code></td><td><code>i_get_style_var</code></td><td><code>int i_get_style_var(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.ShowDemoWindow</code></td><td><code>i_show_demo_window</code></td><td><code>int i_show_demo_window(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsItemHovered</code></td><td><code>i_is_item_hovered</code></td><td><code>int i_is_item_hovered(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Framerate</code></td><td><code>i_framerate</code></td><td><code>int i_framerate(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.WantCaptureMouse</code></td><td><code>i_want_capture_mouse</code></td><td><code>int i_want_capture_mouse(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.KeyDown</code></td><td><code>i_key_down</code></td><td><code>int i_key_down(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsWindowAppearing</code></td><td><code>i_is_window_appearing</code></td><td><code>int i_is_window_appearing(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsWindowCollapsed</code></td><td><code>i_is_window_collapsed</code></td><td><code>int i_is_window_collapsed(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsWindowFocused</code></td><td><code>i_is_window_focused</code></td><td><code>int i_is_window_focused(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsWindowHovered</code></td><td><code>i_is_window_hovered</code></td><td><code>int i_is_window_hovered(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetWindowPos</code></td><td><code>i_get_window_pos</code></td><td><code>int i_get_window_pos(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetWindowSize</code></td><td><code>i_get_window_size</code></td><td><code>int i_get_window_size(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetWindowWidth</code></td><td><code>i_get_window_width</code></td><td><code>int i_get_window_width(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetWindowHeight</code></td><td><code>i_get_window_height</code></td><td><code>int i_get_window_height(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetNextWindowCollapsed</code></td><td><code>i_set_next_window_collapsed</code></td><td><code>int i_set_next_window_collapsed(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetNextWindowFocus</code></td><td><code>i_set_next_window_focus</code></td><td><code>int i_set_next_window_focus(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetNextWindowBgAlpha</code></td><td><code>i_set_next_window_bg_alpha</code></td><td><code>int i_set_next_window_bg_alpha(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetNextWindowContentSize</code></td><td><code>i_set_next_window_content_size</code></td><td><code>int i_set_next_window_content_size(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetScrollX</code></td><td><code>i_get_scroll_x</code></td><td><code>int i_get_scroll_x(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetScrollY</code></td><td><code>i_get_scroll_y</code></td><td><code>int i_get_scroll_y(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetScrollX</code></td><td><code>i_set_scroll_x</code></td><td><code>int i_set_scroll_x(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetScrollY</code></td><td><code>i_set_scroll_y</code></td><td><code>int i_set_scroll_y(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetScrollMaxX</code></td><td><code>i_get_scroll_max_x</code></td><td><code>int i_get_scroll_max_x(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetScrollMaxY</code></td><td><code>i_get_scroll_max_y</code></td><td><code>int i_get_scroll_max_y(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetScrollHereY</code></td><td><code>i_set_scroll_here_y</code></td><td><code>int i_set_scroll_here_y(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Dummy</code></td><td><code>i_dummy</code></td><td><code>int i_dummy(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginGroup</code></td><td><code>i_begin_group</code></td><td><code>int i_begin_group(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndGroup</code></td><td><code>i_end_group</code></td><td><code>int i_end_group(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.AlignTextToFramePadding</code></td><td><code>i_align_text_to_frame_padding</code></td><td><code>int i_align_text_to_frame_padding(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetTextLineHeight</code></td><td><code>i_get_text_line_height</code></td><td><code>int i_get_text_line_height(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetFrameHeight</code></td><td><code>i_get_frame_height</code></td><td><code>int i_get_frame_height(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.PushID</code></td><td><code>i_push_id</code></td><td><code>int i_push_id(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.PopID</code></td><td><code>i_pop_id</code></td><td><code>int i_pop_id(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TextUnformatted</code></td><td><code>i_text_unformatted</code></td><td><code>int i_text_unformatted(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.LabelText</code></td><td><code>i_label_text</code></td><td><code>int i_label_text(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BulletText</code></td><td><code>i_bullet_text</code></td><td><code>int i_bullet_text(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SeparatorText</code></td><td><code>i_separator_text</code></td><td><code>int i_separator_text(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.InvisibleButton</code></td><td><code>i_invisible_button</code></td><td><code>int i_invisible_button(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.ArrowButton</code></td><td><code>i_arrow_button</code></td><td><code>int i_arrow_button(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.RadioButton</code></td><td><code>i_radio_button</code></td><td><code>int i_radio_button(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Bullet</code></td><td><code>i_bullet</code></td><td><code>int i_bullet(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.ColorEdit3</code></td><td><code>i_color_edit3</code></td><td><code>int i_color_edit3(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.ColorEdit4</code></td><td><code>i_color_edit4</code></td><td><code>int i_color_edit4(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.ColorPicker3</code></td><td><code>i_color_picker3</code></td><td><code>int i_color_picker3(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.ColorPicker4</code></td><td><code>i_color_picker4</code></td><td><code>int i_color_picker4(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.ColorButton</code></td><td><code>i_color_button</code></td><td><code>int i_color_button(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.DragFloat</code></td><td><code>i_drag_float</code></td><td><code>int i_drag_float(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.DragInt</code></td><td><code>i_drag_int</code></td><td><code>int i_drag_int(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SliderFloat2</code></td><td><code>i_slider_float2</code></td><td><code>int i_slider_float2(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SliderFloat3</code></td><td><code>i_slider_float3</code></td><td><code>int i_slider_float3(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SliderAngle</code></td><td><code>i_slider_angle</code></td><td><code>int i_slider_angle(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.InputText</code></td><td><code>i_input_text</code></td><td><code>int i_input_text(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.InputDouble</code></td><td><code>i_input_double</code></td><td><code>int i_input_double(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.InputFloat2</code></td><td><code>i_input_float2</code></td><td><code>int i_input_float2(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.InputFloat3</code></td><td><code>i_input_float3</code></td><td><code>int i_input_float3(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginCombo</code></td><td><code>i_begin_combo</code></td><td><code>int i_begin_combo(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndCombo</code></td><td><code>i_end_combo</code></td><td><code>int i_end_combo(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.Selectable</code></td><td><code>i_selectable</code></td><td><code>int i_selectable(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginListBox</code></td><td><code>i_begin_list_box</code></td><td><code>int i_begin_list_box(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndListBox</code></td><td><code>i_end_list_box</code></td><td><code>int i_end_list_box(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginTabBar</code></td><td><code>i_begin_tab_bar</code></td><td><code>int i_begin_tab_bar(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndTabBar</code></td><td><code>i_end_tab_bar</code></td><td><code>int i_end_tab_bar(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginTabItem</code></td><td><code>i_begin_tab_item</code></td><td><code>int i_begin_tab_item(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndTabItem</code></td><td><code>i_end_tab_item</code></td><td><code>int i_end_tab_item(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TabItemButton</code></td><td><code>i_tab_item_button</code></td><td><code>int i_tab_item_button(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginPopup</code></td><td><code>i_begin_popup</code></td><td><code>int i_begin_popup(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndPopup</code></td><td><code>i_end_popup</code></td><td><code>int i_end_popup(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.OpenPopup</code></td><td><code>i_open_popup</code></td><td><code>int i_open_popup(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.CloseCurrentPopup</code></td><td><code>i_close_current_popup</code></td><td><code>int i_close_current_popup(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginPopupContextItem</code></td><td><code>i_begin_popup_context_item</code></td><td><code>int i_begin_popup_context_item(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsPopupOpen</code></td><td><code>i_is_popup_open</code></td><td><code>int i_is_popup_open(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginTable</code></td><td><code>i_begin_table</code></td><td><code>int i_begin_table(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndTable</code></td><td><code>i_end_table</code></td><td><code>int i_end_table(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TableNextRow</code></td><td><code>i_table_next_row</code></td><td><code>int i_table_next_row(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TableNextColumn</code></td><td><code>i_table_next_column</code></td><td><code>int i_table_next_column(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TableSetupColumn</code></td><td><code>i_table_setup_column</code></td><td><code>int i_table_setup_column(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TableHeadersRow</code></td><td><code>i_table_headers_row</code></td><td><code>int i_table_headers_row(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TableGetColumnCount</code></td><td><code>i_table_get_column_count</code></td><td><code>int i_table_get_column_count(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.TableGetColumnName</code></td><td><code>i_table_get_column_name</code></td><td><code>int i_table_get_column_name(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginMenuBar</code></td><td><code>i_begin_menu_bar</code></td><td><code>int i_begin_menu_bar(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndMenuBar</code></td><td><code>i_end_menu_bar</code></td><td><code>int i_end_menu_bar(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginMenu</code></td><td><code>i_begin_menu</code></td><td><code>int i_begin_menu(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndMenu</code></td><td><code>i_end_menu</code></td><td><code>int i_end_menu(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.MenuItem</code></td><td><code>i_menu_item</code></td><td><code>int i_menu_item(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginTooltip</code></td><td><code>i_begin_tooltip</code></td><td><code>int i_begin_tooltip(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndTooltip</code></td><td><code>i_end_tooltip</code></td><td><code>int i_end_tooltip(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetTooltip</code></td><td><code>i_set_tooltip</code></td><td><code>int i_set_tooltip(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.BeginDisabled</code></td><td><code>i_begin_disabled</code></td><td><code>int i_begin_disabled(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.EndDisabled</code></td><td><code>i_end_disabled</code></td><td><code>int i_end_disabled(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsItemActive</code></td><td><code>i_is_item_active</code></td><td><code>int i_is_item_active(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsItemFocused</code></td><td><code>i_is_item_focused</code></td><td><code>int i_is_item_focused(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsItemClicked</code></td><td><code>i_is_item_clicked</code></td><td><code>int i_is_item_clicked(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsItemVisible</code></td><td><code>i_is_item_visible</code></td><td><code>int i_is_item_visible(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsItemEdited</code></td><td><code>i_is_item_edited</code></td><td><code>int i_is_item_edited(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsItemActivated</code></td><td><code>i_is_item_activated</code></td><td><code>int i_is_item_activated(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsItemDeactivated</code></td><td><code>i_is_item_deactivated</code></td><td><code>int i_is_item_deactivated(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetTime</code></td><td><code>i_get_time</code></td><td><code>int i_get_time(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetFrameCount</code></td><td><code>i_get_frame_count</code></td><td><code>int i_get_frame_count(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetVersion</code></td><td><code>i_get_version</code></td><td><code>int i_get_version(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetFontSize</code></td><td><code>i_get_font_size</code></td><td><code>int i_get_font_size(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetCursorScreenPos</code></td><td><code>i_get_cursor_screen_pos</code></td><td><code>int i_get_cursor_screen_pos(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetContentRegionAvail</code></td><td><code>i_get_content_region_avail</code></td><td><code>int i_get_content_region_avail(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetCursorScreenPos</code></td><td><code>i_set_cursor_screen_pos</code></td><td><code>int i_set_cursor_screen_pos(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetNextItemWidth</code></td><td><code>i_set_next_item_width</code></td><td><code>int i_set_next_item_width(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetItemDefaultFocus</code></td><td><code>i_set_item_default_focus</code></td><td><code>int i_set_item_default_focus(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetMousePos</code></td><td><code>i_get_mouse_pos</code></td><td><code>int i_get_mouse_pos(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsMouseDown</code></td><td><code>i_is_mouse_down</code></td><td><code>int i_is_mouse_down(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsMouseClicked</code></td><td><code>i_is_mouse_clicked</code></td><td><code>int i_is_mouse_clicked(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.IsMouseReleased</code></td><td><code>i_is_mouse_released</code></td><td><code>int i_is_mouse_released(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.SetNextItemOpen</code></td><td><code>i_set_next_item_open</code></td><td><code>int i_set_next_item_open(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetDisplaySize</code></td><td><code>i_get_display_size</code></td><td><code>int i_get_display_size(lua_State* L)</code></td></tr>
+<tr><td><code>imgui.GetColorU32</code></td><td><code>i_get_color_u32</code></td><td><code>int i_get_color_u32(lua_State* L)</code></td></tr>
+</table>
+<h2 id="mem">mem table bindings</h2>
+<table border="1">
+<tr><th>Lua name</th><th>C++ function</th><th>C++ signature</th></tr>
+<tr><td><code>mem.ptr</code></td><td><code>m_ptr</code></td><td><code>int m_ptr(lua_State* L)</code></td></tr>
+<tr><td><code>mem.add</code></td><td><code>m_add</code></td><td><code>int m_add(lua_State* L)</code></td></tr>
+<tr><td><code>mem.sub</code></td><td><code>m_sub</code></td><td><code>int m_sub(lua_State* L)</code></td></tr>
+<tr><td><code>mem.num</code></td><td><code>m_num</code></td><td><code>int m_num(lua_State* L)</code></td></tr>
+<tr><td><code>mem.hex</code></td><td><code>m_hex</code></td><td><code>int m_hex(lua_State* L)</code></td></tr>
+<tr><td><code>mem.is_readable</code></td><td><code>m_is_readable</code></td><td><code>int m_is_readable(lua_State* L)</code></td></tr>
+<tr><td><code>mem.read8</code></td><td><code>m_read8</code></td><td><code>int m_read8(lua_State* L)</code></td></tr>
+<tr><td><code>mem.read16</code></td><td><code>m_read16</code></td><td><code>int m_read16(lua_State* L)</code></td></tr>
+<tr><td><code>mem.read32</code></td><td><code>m_read32</code></td><td><code>int m_read32(lua_State* L)</code></td></tr>
+<tr><td><code>mem.read_u64</code></td><td><code>m_read_u64</code></td><td><code>int m_read_u64(lua_State* L)</code></td></tr>
+<tr><td><code>mem.read_float</code></td><td><code>m_read_f</code></td><td><code>int m_read_f(lua_State* L)</code></td></tr>
+<tr><td><code>mem.read_double</code></td><td><code>m_read_d</code></td><td><code>int m_read_d(lua_State* L)</code></td></tr>
+<tr><td><code>mem.read_string</code></td><td><code>m_read_string</code></td><td><code>int m_read_string(lua_State* L)</code></td></tr>
+<tr><td><code>mem.read_bytes</code></td><td><code>m_read_bytes</code></td><td><code>int m_read_bytes(lua_State* L)</code></td></tr>
+<tr><td><code>mem.write8</code></td><td><code>m_write8</code></td><td><code>int m_write8(lua_State* L)</code></td></tr>
+<tr><td><code>mem.write16</code></td><td><code>m_write16</code></td><td><code>int m_write16(lua_State* L)</code></td></tr>
+<tr><td><code>mem.write32</code></td><td><code>m_write32</code></td><td><code>int m_write32(lua_State* L)</code></td></tr>
+<tr><td><code>mem.write_u64</code></td><td><code>m_write_u64</code></td><td><code>int m_write_u64(lua_State* L)</code></td></tr>
+<tr><td><code>mem.write_float</code></td><td><code>m_write_f</code></td><td><code>int m_write_f(lua_State* L)</code></td></tr>
+<tr><td><code>mem.write_double</code></td><td><code>m_write_d</code></td><td><code>int m_write_d(lua_State* L)</code></td></tr>
+<tr><td><code>mem.write_string</code></td><td><code>m_write_string</code></td><td><code>int m_write_string(lua_State* L)</code></td></tr>
+<tr><td><code>mem.write_bytes</code></td><td><code>m_write_bytes</code></td><td><code>int m_write_bytes(lua_State* L)</code></td></tr>
+<tr><td><code>mem.protect</code></td><td><code>m_protect</code></td><td><code>int m_protect(lua_State* L)</code></td></tr>
+<tr><td><code>mem.allocate</code></td><td><code>m_allocate</code></td><td><code>int m_allocate(lua_State* L)</code></td></tr>
+<tr><td><code>mem.free</code></td><td><code>m_free</code></td><td><code>int m_free(lua_State* L)</code></td></tr>
+<tr><td><code>mem.flush</code></td><td><code>m_flush</code></td><td><code>int m_flush(lua_State* L)</code></td></tr>
+<tr><td><code>mem.jmp_patch</code></td><td><code>m_jmp_patch</code></td><td><code>int m_jmp_patch(lua_State* L)</code></td></tr>
+<tr><td><code>mem.vtable_get</code></td><td><code>m_vtable_get</code></td><td><code>int m_vtable_get(lua_State* L)</code></td></tr>
+<tr><td><code>mem.vtable_set</code></td><td><code>m_vtable_set</code></td><td><code>int m_vtable_set(lua_State* L)</code></td></tr>
+<tr><td><code>mem.module</code></td><td><code>m_module</code></td><td><code>int m_module(lua_State* L)</code></td></tr>
+<tr><td><code>mem.modules</code></td><td><code>m_modules</code></td><td><code>int m_modules(lua_State* L)</code></td></tr>
+<tr><td><code>mem.scan</code></td><td><code>m_scan</code></td><td><code>int m_scan(lua_State* L)</code></td></tr>
+<tr><td><code>mem.follow</code></td><td><code>m_follow</code></td><td><code>int m_follow(lua_State* L)</code></td></tr>
+<tr><td><code>mem.resolve_rip</code></td><td><code>m_resolve_rip</code></td><td><code>int m_resolve_rip(lua_State* L)</code></td></tr>
+</table>
+<h2 id="ptr">Pointer metatable</h2>
+<p>Metatable name: <code>mem_ptr</code>. Applied to values returned by <code>mem.ptr</code> and friends.</p>
+<table border="1">
+<tr><th>Metamethod</th><th>C++ function</th><th>C++ signature</th></tr>
+<tr><td><code>__add</code></td><td><code>ptr_add</code></td><td><code>int ptr_add(lua_State* L)</code></td></tr>
+<tr><td><code>__sub</code></td><td><code>ptr_sub</code></td><td><code>int ptr_sub(lua_State* L)</code></td></tr>
+<tr><td><code>__eq</code></td><td><code>ptr_eq</code></td><td><code>int ptr_eq(lua_State* L)</code></td></tr>
+<tr><td><code>__tostring</code></td><td><code>ptr_tostring</code></td><td><code>int ptr_tostring(lua_State* L)</code></td></tr>
+</table>
+<h2 id="counts">Counts</h2>
+<ul>
+<li>ser bindings: 29</li>
+<li>imgui bindings: 172</li>
+<li>mem bindings: 34</li>
+<li>total Lua bindings: 235</li>
+</ul>
+</body>
+</html>
