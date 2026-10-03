@@ -1,0 +1,1548 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>HeavenHook Lua API Reference</title>
+<style>body{font-family:Consolas,Menlo,monospace;margin:24px;line-height:1.45;color:#222}h1{font-size:24px}h2{font-size:19px;margin-top:30px;border-bottom:2px solid #444;padding-bottom:4px}h3{font-size:15px;margin:18px 0 6px;color:#036}code{background:#f2f2f2;padding:1px 4px;border-radius:3px}table{border-collapse:collapse;margin:6px 0 14px 0;width:100%}td,th{border:1px solid #ccc;padding:3px 8px;text-align:left;vertical-align:top}th{background:#eee}.hint{color:#666}.tag{color:#777;font-size:12px}ul{margin:4px 0 14px 0}.sec{background:#fafafa;border:1px solid #e0e0e0;padding:10px 14px;margin:10px 0}</style></head><body>
+<h1>HeavenHook Lua API Reference</h1>
+<p class="hint">Auto-generated from: LuaAPI.cpp, LuaManager.cpp, LuaMenuSystem.cpp, lua_imgui_gen_funcs.cpp, lua_imgui_gen_reg.cpp</p>
+<p class="hint">45 binding functions &middot; 4 metatables &middot; 37 registration groups &middot; 74 globals &middot; 256 ImGui functions.</p>
+<h2>How to use this reference</h2>
+<div class="sec"><p>Every symbol a Lua script can reach is listed below by its Lua name and the C++ function that implements it. Classes are userdata object metatables; global tables are ordinary Lua tables created during registration; global values are set with <code>lua_setglobal</code>. Hook callbacks are global functions a script can define to receive engine events.</p></div>
+<h2>Quick start &mdash; how callbacks work</h2>
+<div class="sec">
+<p><b>You never register anything.</b> There is no <code>register_callback</code>, no <code>add_event</code>, no init/setup call. The engine looks for a <b>global Lua function with a fixed name</b> when your script loads. If the function exists, it is called on every matching event; if it does not exist, that hook is simply skipped for your script.</p>
+<p>So the whole "API" for hooking is: <i>declare a function with the right name at file scope.</i></p>
+<pre><code>-- my_script.lua  (this is the entire setup)
+function on_end_scene()
+    -- called every frame, render thread
+end
+
+function on_create_move(cmd, player)
+    -- called every tick for the local player
+end</code></pre>
+<p class="hint">Names are case-sensitive and use the lowercase <code>on_</code> form &mdash; <code>on_end_scene</code>, not <code>EndScene</code>. The old PascalCase list was only a friendly label; the real global names are in the callback table below. You only <b>return</b> a value for the few callbacks that document one (see the <i>Returns</i> column).</p>
+</div>
+
+<h2 id="gui">ImGui drawing (<code>on_end_scene</code>) vs engine paint (<code>on_paint</code>)</h2>
+<div class="sec">
+<p>This is the single most common mistake. There are <b>two unrelated drawing systems</b> and they do not mix:</p>
+<table>
+<tr><th>Callback</th><th>Use it for</th><th>What is valid inside</th></tr>
+<tr><td><code>on_end_scene()</code></td><td><b>ImGui.</b> Runs on the render thread once per frame with an active ImGui frame.</td><td>Everything in the <code>imgui.*</code> table (<code>imgui.begin_window</code>, <code>imgui.text</code>, <code>imgui.button</code>, &hellip;).</td></tr>
+<tr><td><code>on_paint()</code></td><td>Engine / VGUI / HUD paint.</td><td>The <code>draw.*</code> helpers (<code>draw.line</code>, <code>draw.rect</code>, <code>draw.string</code>, &hellip;).</td></tr>
+</table>
+<p><b><code>imgui.*</code> does NOT work inside <code>on_paint</code>.</b> There is no ImGui frame active there, so calls do nothing or break layout. Conversely, <code>draw.*</code> is the engine surface &mdash; it is not ImGui and has no widgets. If you want ImGui windows/widgets, use <code>on_end_scene</code>. If you want to draw on the HUD, use <code>on_paint</code> with <code>draw.*</code>.</p>
+<p>Every ImGui frame must be balanced with begin/end:</p>
+<pre><code>function on_end_scene()
+    imgui.begin_window("My window")
+    imgui.text("hello")
+    if imgui.button("click me") then
+        -- true only on the frame the button is pressed
+    end
+    imgui.end_window()
+end</code></pre>
+<h3>ImGui conventions</h3>
+<p>The <code>imgui.*</code> functions mirror Dear ImGui's C++ API one-to-one but in snake_case. Their arguments and return values follow the C++ originals, for example:</p>
+<ul>
+<li><code>imgui.button(label)</code> &rarr; <code>boolean</code> (true on the frame it was clicked)</li>
+<li><code>imgui.checkbox(label, value)</code> &rarr; <code>value, changed</code></li>
+<li><code>imgui.slider_float(label, value, min, max)</code> &rarr; <code>value, changed</code></li>
+<li><code>imgui.input_text(label, text)</code> &rarr; <code>text, changed</code></li>
+<li><code>imgui.begin_window(name)</code> / <code>imgui.end_window()</code> &rarr; no return</li>
+</ul>
+<p class="hint">When in doubt, check the Dear ImGui documentation for the matching C++ function &mdash; the Lua wrapper keeps the same parameter order and return values.</p>
+</div>
+
+<h2 id="native">Native helpers (not ImGui)</h2>
+<div class="sec">
+<p>These globals exist alongside ImGui and are the engine-side utilities you can call from any callback.</p>
+
+<h3><code>draw.*</code> &mdash; engine surface drawing</h3>
+<p class="hint">Colors are floats <b>0.0&ndash;1.0</b> (r, g, b, a). Coordinates are screen pixels. Best used inside <code>on_paint</code> / <code>on_paint_traverse_*</code>. All of these return nothing.</p>
+<table>
+<tr><th>Call</th><th>Arguments</th><th>Returns</th></tr>
+<tr><td><code>draw.string(x, y, text, font, r, g, b, a, align)</code></td><td>x,y int; text string; font int <i>(optional, default 0)</i>; r,g,b,a float; align int <i>(optional, default 0)</i></td><td>nil</td></tr>
+<tr><td><code>draw.line(x1, y1, x2, y2, r, g, b, a)</code></td><td>4 ints, 4 floats</td><td>nil</td></tr>
+<tr><td><code>draw.rect(x, y, w, h, r, g, b, a)</code></td><td>4 ints, 4 floats</td><td>nil</td></tr>
+<tr><td><code>draw.outlined_rect(x, y, w, h, r, g, b, a)</code></td><td>4 ints, 4 floats</td><td>nil</td></tr>
+<tr><td><code>draw.gradient_rect(x, y, w, h, r1, g1, b1, a1, r2, g2, b2, a2, horizontal)</code></td><td>4 ints, 8 floats, bool</td><td>nil</td></tr>
+<tr><td><code>draw.circle(x, y, radius, segments, r, g, b, a)</code></td><td>4 ints, 4 floats</td><td>nil</td></tr>
+<tr><td><code>draw.outlined_circle(x, y, radius, segments, r, g, b, a)</code></td><td>4 ints, 4 floats</td><td>nil</td></tr>
+<tr><td><code>draw.triangle(x1, y1, x2, y2, x3, y3, r, g, b, a)</code></td><td>10 floats</td><td>nil</td></tr>
+<tr><td><code>draw.get_text_width(font, text)</code></td><td>font int; text string</td><td>number (pixels)</td></tr>
+<tr><td><code>draw.get_font_height(font)</code></td><td>font int</td><td>number (pixels)</td></tr>
+<tr><td><code>draw.get_screen_size()</code></td><td>none</td><td><b>width, height</b> (two numbers)</td></tr>
+</table>
+
+<h3><code>get_global_vars()</code> &mdash; timing / "tick"</h3>
+<p>There is no bare <code>tick</code> global. <code>get_global_vars()</code> returns a <b>table</b> with named fields. For just the tick or frame time you can also use <code>client.get_tick_count()</code> and <code>client.get_frame_time()</code>.</p>
+<pre><code>local gv = get_global_vars()            -- returns a TABLE
+local tick      = gv.tickcount           -- integer: current tick ("tick")
+local curtime   = gv.curtime             -- number
+local frametime = gv.frametime           -- number
+local interval  = gv.interval_per_tick   -- number: seconds per tick</code></pre>
+
+<h3>Other namespaces</h3>
+<p>Also registered and usable from any callback (members listed further down): <code>render</code>, <code>client</code>, <code>entity</code>, <code>events</code>, <code>file</code>, <code>windows</code>, <code>audio</code>, <code>playsound</code>, <code>material_system</code>, <code>menu</code>, <code>dpi</code>, <code>cvar</code>, <code>cvar_vars</code>, <code>fonts</code>, <code>text_align</code>, <code>memory</code>, <code>modules</code>, <code>hooks</code>, <code>utils</code>, <code>materials</code>, <code>model_info</code>, <code>input</code>, <code>keys</code>, <code>vector</code>, <code>image</code>, <code>Interface</code>, and the enum tables (<code>buttons</code>, <code>team</code>, <code>weapon_id</code>, <code>frame_stage</code>, <code>hitgroup</code>, <code>contents</code>, <code>trace_mask</code>, &hellip;).</p>
+</div>
+
+<h2>Object / metatable conventions</h2>
+<div class="sec">
+<p>Objects passed to callbacks (the <code>cmd</code> userdata, <code>player</code>, materials, textures, weapons, game events) are userdata with a metatable. Their members are called as methods and follow a strict naming rule:</p>
+<ul>
+<li><code>get_xxx()</code> returns the value.</li>
+<li><code>set_xxx(value)</code> changes it and returns nothing.</li>
+<li><code>is_xxx()</code> / <code>has_xxx()</code> return a <code>boolean</code>.</li>
+</ul>
+<pre><code>function on_create_move(cmd, player)
+    local ang = cmd:get_viewangles()   -- returns a vector
+    cmd:set_viewangles(ang)            -- setters return nothing
+    local buttons = cmd:get_buttons()
+    cmd:set_buttons(buttons)
+end</code></pre>
+<p class="hint">The per-member lists below show the Lua name and the C++ function that backs it. Use the get_/set_/is_ rule above to know the return value.</p>
+</div>
+
+<h2>Classes / Metatables</h2>
+<div class="sec"><h3>USERCMD_META <span class="tag">(131 members)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_viewangles</code></td><td><code>cmd_get_viewangles</code></td></tr>
+<tr><td><code>set_viewangles</code></td><td><code>cmd_set_viewangles</code></td></tr>
+<tr><td><code>get_buttons</code></td><td><code>cmd_get_buttons</code></td></tr>
+<tr><td><code>set_buttons</code></td><td><code>cmd_set_buttons</code></td></tr>
+<tr><td><code>get_forwardmove</code></td><td><code>cmd_get_forwardmove</code></td></tr>
+<tr><td><code>set_forwardmove</code></td><td><code>cmd_set_forwardmove</code></td></tr>
+<tr><td><code>get_sidemove</code></td><td><code>cmd_get_sidemove</code></td></tr>
+<tr><td><code>set_sidemove</code></td><td><code>cmd_set_sidemove</code></td></tr>
+<tr><td><code>get_upmove</code></td><td><code>cmd_get_upmove</code></td></tr>
+<tr><td><code>set_upmove</code></td><td><code>cmd_set_upmove</code></td></tr>
+<tr><td><code>get_tickcount</code></td><td><code>cmd_get_tickcount</code></td></tr>
+<tr><td><code>set_tickcount</code></td><td><code>cmd_set_tickcount</code></td></tr>
+<tr><td><code>get_command_number</code></td><td><code>cmd_get_command_number</code></td></tr>
+<tr><td><code>set_command_number</code></td><td><code>cmd_set_command_number</code></td></tr>
+<tr><td><code>get_impulse</code></td><td><code>cmd_get_impulse</code></td></tr>
+<tr><td><code>set_impulse</code></td><td><code>cmd_set_impulse</code></td></tr>
+<tr><td><code>get_weaponselect</code></td><td><code>cmd_get_weaponselect</code></td></tr>
+<tr><td><code>set_weaponselect</code></td><td><code>cmd_set_weaponselect</code></td></tr>
+<tr><td><code>get_weaponsubtype</code></td><td><code>cmd_get_weaponsubtype</code></td></tr>
+<tr><td><code>set_weaponsubtype</code></td><td><code>cmd_set_weaponsubtype</code></td></tr>
+<tr><td><code>get_random_seed</code></td><td><code>cmd_get_random_seed</code></td></tr>
+<tr><td><code>set_random_seed</code></td><td><code>cmd_set_random_seed</code></td></tr>
+<tr><td><code>get_mousedx</code></td><td><code>cmd_get_mousedx</code></td></tr>
+<tr><td><code>set_mousedx</code></td><td><code>cmd_set_mousedx</code></td></tr>
+<tr><td><code>get_mousedy</code></td><td><code>cmd_get_mousedy</code></td></tr>
+<tr><td><code>set_mousedy</code></td><td><code>cmd_set_mousedy</code></td></tr>
+<tr><td><code>get_predicted</code></td><td><code>cmd_get_predicted</code></td></tr>
+<tr><td><code>set_predicted</code></td><td><code>cmd_set_predicted</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>material_get_name</code></td></tr>
+<tr><td><code>get_texture_group_name</code></td><td><code>material_get_texture_group_name</code></td></tr>
+<tr><td><code>is_translucent</code></td><td><code>material_is_translucent</code></td></tr>
+<tr><td><code>is_error_material</code></td><td><code>material_is_error_material</code></td></tr>
+<tr><td><code>alpha_modulate</code></td><td><code>material_alpha_modulate</code></td></tr>
+<tr><td><code>color_modulate</code></td><td><code>material_color_modulate</code></td></tr>
+<tr><td><code>set_material_var_flag</code></td><td><code>material_set_material_var_flag</code></td></tr>
+<tr><td><code>get_material_var_flag</code></td><td><code>material_get_material_var_flag</code></td></tr>
+<tr><td><code>find_var</code></td><td><code>material_find_var</code></td></tr>
+<tr><td><code>increment_reference_count</code></td><td><code>material_increment_reference_count</code></td></tr>
+<tr><td><code>decrement_reference_count</code></td><td><code>material_decrement_reference_count</code></td></tr>
+<tr><td><code>refresh</code></td><td><code>material_refresh</code></td></tr>
+<tr><td><code>get_alpha_modulation</code></td><td><code>material_get_alpha_modulation</code></td></tr>
+<tr><td><code>get_color_modulation</code></td><td><code>material_get_color_modulation</code></td></tr>
+<tr><td><code>add_ref</code></td><td><code>material_add_ref</code></td></tr>
+<tr><td><code>release</code></td><td><code>material_release</code></td></tr>
+<tr><td><code>is_two_sided</code></td><td><code>material_is_two_sided</code></td></tr>
+<tr><td><code>is_vertex_lit</code></td><td><code>material_is_vertex_lit</code></td></tr>
+<tr><td><code>is_alpha_tested</code></td><td><code>material_is_alpha_tested</code></td></tr>
+<tr><td><code>get_num_passes</code></td><td><code>material_get_num_passes</code></td></tr>
+<tr><td><code>set_shader</code></td><td><code>material_set_shader</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>materialvar_get_name</code></td></tr>
+<tr><td><code>get_string_value</code></td><td><code>materialvar_get_string_value</code></td></tr>
+<tr><td><code>set_string_value</code></td><td><code>materialvar_set_string_value</code></td></tr>
+<tr><td><code>get_int_value</code></td><td><code>materialvar_get_int_value</code></td></tr>
+<tr><td><code>set_int_value</code></td><td><code>materialvar_set_int_value</code></td></tr>
+<tr><td><code>get_float_value</code></td><td><code>materialvar_get_float_value</code></td></tr>
+<tr><td><code>set_float_value</code></td><td><code>materialvar_set_float_value</code></td></tr>
+<tr><td><code>set_vec_value</code></td><td><code>materialvar_set_vec_value</code></td></tr>
+<tr><td><code>get_texture_value</code></td><td><code>materialvar_get_texture_value</code></td></tr>
+<tr><td><code>set_texture_value</code></td><td><code>materialvar_set_texture_value</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>texture_get_name</code></td></tr>
+<tr><td><code>get_actual_width</code></td><td><code>texture_get_actual_width</code></td></tr>
+<tr><td><code>get_actual_height</code></td><td><code>texture_get_actual_height</code></td></tr>
+<tr><td><code>is_translucent</code></td><td><code>texture_is_translucent</code></td></tr>
+<tr><td><code>is_error</code></td><td><code>texture_is_error</code></td></tr>
+<tr><td><code>increment_reference_count</code></td><td><code>texture_increment_reference_count</code></td></tr>
+<tr><td><code>decrement_reference_count</code></td><td><code>texture_decrement_reference_count</code></td></tr>
+<tr><td><code>download</code></td><td><code>texture_download</code></td></tr>
+<tr><td><code>add_ref</code></td><td><code>texture_add_ref</code></td></tr>
+<tr><td><code>release</code></td><td><code>texture_release</code></td></tr>
+<tr><td><code>is_render_target</code></td><td><code>texture_is_render_target</code></td></tr>
+<tr><td><code>is_cube_map</code></td><td><code>texture_is_cube_map</code></td></tr>
+<tr><td><code>get_mapping_width</code></td><td><code>texture_get_mapping_width</code></td></tr>
+<tr><td><code>get_mapping_height</code></td><td><code>texture_get_mapping_height</code></td></tr>
+<tr><td><code>get_primary_ammo_type</code></td><td><code>weapon_get_primary_ammo_type</code></td></tr>
+<tr><td><code>get_secondary_ammo_type</code></td><td><code>weapon_get_secondary_ammo_type</code></td></tr>
+<tr><td><code>get_viewmodel_index</code></td><td><code>weapon_get_viewmodel_index</code></td></tr>
+<tr><td><code>get_next_primary_attack</code></td><td><code>weapon_get_next_primary_attack</code></td></tr>
+<tr><td><code>set_next_primary_attack</code></td><td><code>weapon_set_next_primary_attack</code></td></tr>
+<tr><td><code>get_next_secondary_attack</code></td><td><code>weapon_get_next_secondary_attack</code></td></tr>
+<tr><td><code>set_next_secondary_attack</code></td><td><code>weapon_set_next_secondary_attack</code></td></tr>
+<tr><td><code>get_next_think_tick</code></td><td><code>weapon_get_next_think_tick</code></td></tr>
+<tr><td><code>get_time_weapon_idle</code></td><td><code>weapon_get_time_weapon_idle</code></td></tr>
+<tr><td><code>set_time_weapon_idle</code></td><td><code>weapon_set_time_weapon_idle</code></td></tr>
+<tr><td><code>get_queued_attack</code></td><td><code>weapon_get_queued_attack</code></td></tr>
+<tr><td><code>get_time_attack_queued</code></td><td><code>weapon_get_time_attack_queued</code></td></tr>
+<tr><td><code>is_only_pump</code></td><td><code>weapon_is_only_pump</code></td></tr>
+<tr><td><code>get_state</code></td><td><code>weapon_get_state</code></td></tr>
+<tr><td><code>get_owner</code></td><td><code>weapon_get_owner</code></td></tr>
+<tr><td><code>is_in_reload</code></td><td><code>weapon_is_in_reload</code></td></tr>
+<tr><td><code>get_world_model_index</code></td><td><code>weapon_get_world_model_index</code></td></tr>
+<tr><td><code>get_view_model_index</code></td><td><code>weapon_get_view_model_index</code></td></tr>
+<tr><td><code>get_extra_primary_ammo</code></td><td><code>weapon_get_extra_primary_ammo</code></td></tr>
+<tr><td><code>get_clip1</code></td><td><code>weapon_get_clip1</code></td></tr>
+<tr><td><code>get_weapon_id</code></td><td><code>weapon_get_weapon_id</code></td></tr>
+<tr><td><code>get_clip2</code></td><td><code>weapon_get_clip2</code></td></tr>
+<tr><td><code>get_slot</code></td><td><code>weapon_get_slot</code></td></tr>
+<tr><td><code>get_position</code></td><td><code>weapon_get_position</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>weapon_get_name</code></td></tr>
+<tr><td><code>get_print_name</code></td><td><code>weapon_get_print_name</code></td></tr>
+<tr><td><code>get_view_model</code></td><td><code>weapon_get_view_model</code></td></tr>
+<tr><td><code>get_world_model</code></td><td><code>weapon_get_world_model</code></td></tr>
+<tr><td><code>get_max_clip1</code></td><td><code>weapon_get_max_clip1</code></td></tr>
+<tr><td><code>get_max_clip2</code></td><td><code>weapon_get_max_clip2</code></td></tr>
+<tr><td><code>get_default_clip1</code></td><td><code>weapon_get_default_clip1</code></td></tr>
+<tr><td><code>get_default_clip2</code></td><td><code>weapon_get_default_clip2</code></td></tr>
+<tr><td><code>has_ammo</code></td><td><code>weapon_has_ammo</code></td></tr>
+<tr><td><code>has_primary_ammo</code></td><td><code>weapon_has_primary_ammo</code></td></tr>
+<tr><td><code>has_secondary_ammo</code></td><td><code>weapon_has_secondary_ammo</code></td></tr>
+<tr><td><code>uses_clips_for_ammo1</code></td><td><code>weapon_uses_clips_for_ammo1</code></td></tr>
+<tr><td><code>uses_clips_for_ammo2</code></td><td><code>weapon_uses_clips_for_ammo2</code></td></tr>
+<tr><td><code>get_weight</code></td><td><code>weapon_get_weight</code></td></tr>
+<tr><td><code>get_weapon_flags</code></td><td><code>weapon_get_weapon_flags</code></td></tr>
+<tr><td><code>is_grenade</code></td><td><code>weapon_is_grenade</code></td></tr>
+<tr><td><code>get_next_attack</code></td><td><code>combatchar_get_next_attack</code></td></tr>
+<tr><td><code>set_next_attack</code></td><td><code>combatchar_set_next_attack</code></td></tr>
+<tr><td><code>get_active_weapon</code></td><td><code>combatchar_get_active_weapon</code></td></tr>
+<tr><td><code>get_weapon_slot</code></td><td><code>combatchar_get_weapon_slot</code></td></tr>
+<tr><td><code>get_max_speed</code></td><td><code>csweapon_get_max_speed</code></td></tr>
+<tr><td><code>is_silenced</code></td><td><code>csweapon_is_silenced</code></td></tr>
+<tr><td><code>has_scope</code></td><td><code>csweapon_has_scope</code></td></tr>
+<tr><td><code>can_zoom</code></td><td><code>csweapon_can_zoom</code></td></tr>
+<tr><td><code>is_awp</code></td><td><code>csweapon_is_awp</code></td></tr>
+<tr><td><code>should_hide_weapon</code></td><td><code>csweapon_should_hide_weapon</code></td></tr>
+<tr><td><code>can_be_dropped</code></td><td><code>csweapon_can_be_dropped</code></td></tr>
+<tr><td><code>should_drop_behind</code></td><td><code>csweapon_should_drop_behind</code></td></tr>
+<tr><td><code>is_weapon_upgraded</code></td><td><code>csweapon_is_weapon_upgraded</code></td></tr>
+<tr><td><code>get_muzzle_attachment</code></td><td><code>csweapon_get_muzzle_attachment</code></td></tr>
+<tr><td><code>get_shell_attachment</code></td><td><code>csweapon_get_shell_attachment</code></td></tr>
+<tr><td><code>hide_viewmodel_when_zoomed</code></td><td><code>csweapon_hide_viewmodel_when_zoomed</code></td></tr>
+<tr><td><code>has_secondary_attack</code></td><td><code>csweapon_has_secondary_attack</code></td></tr>
+<tr><td><code>is_attacking</code></td><td><code>csweapon_is_attacking</code></td></tr>
+</table>
+</div>
+<div class="sec"><h3>PLAYER_META <span class="tag">(114 members)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_local_data</code></td><td><code>player_get_local_data</code></td></tr>
+<tr><td><code>get_fov_rate_ext</code></td><td><code>player_get_fov_rate_ext</code></td></tr>
+<tr><td><code>is_ducked</code></td><td><code>player_is_ducked_ext</code></td></tr>
+<tr><td><code>is_ducking</code></td><td><code>player_is_ducking_ext</code></td></tr>
+<tr><td><code>get_fall_velocity_ext</code></td><td><code>player_get_fall_velocity_ext</code></td></tr>
+<tr><td><code>get_step_size_ext</code></td><td><code>player_get_step_size_ext</code></td></tr>
+<tr><td><code>get_nbuttons</code></td><td><code>player_get_nbuttons</code></td></tr>
+<tr><td><code>get_nimpulse</code></td><td><code>player_get_nimpulse</code></td></tr>
+<tr><td><code>get_ammo_ptr</code></td><td><code>player_get_ammo_ptr</code></td></tr>
+<tr><td><code>get_vehicle_handle</code></td><td><code>player_get_vehicle_handle</code></td></tr>
+<tr><td><code>get_use_entity_handle</code></td><td><code>player_get_use_entity_handle</code></td></tr>
+<tr><td><code>get_view_entity_handle</code></td><td><code>player_get_view_entity_handle</code></td></tr>
+<tr><td><code>get_ground_entity_handle</code></td><td><code>player_get_ground_entity_handle</code></td></tr>
+<tr><td><code>get_last_weapon_handle</code></td><td><code>player_get_last_weapon_handle</code></td></tr>
+<tr><td><code>get_elevator_handle</code></td><td><code>player_get_elevator_handle</code></td></tr>
+<tr><td><code>get_viewmodel_handle</code></td><td><code>player_get_viewmodel_handle</code></td></tr>
+<tr><td><code>get_water_level_ext</code></td><td><code>player_get_water_level_ext</code></td></tr>
+<tr><td><code>get_fog_ctrl</code></td><td><code>player_get_fog_ctrl</code></td></tr>
+<tr><td><code>get_deadflag</code></td><td><code>player_get_deadflag</code></td></tr>
+<tr><td><code>get_pose_parameter</code></td><td><code>player_get_pose_parameter</code></td></tr>
+<tr><td><code>set_pose_parameter</code></td><td><code>player_set_pose_parameter</code></td></tr>
+<tr><td><code>get_flags</code></td><td><code>player_get_flags</code></td></tr>
+<tr><td><code>get_fov</code></td><td><code>player_get_fov</code></td></tr>
+<tr><td><code>get_default_fov</code></td><td><code>player_get_default_fov</code></td></tr>
+<tr><td><code>get_observer_mode</code></td><td><code>player_get_observer_mode</code></td></tr>
+<tr><td><code>get_observer_target</code></td><td><code>player_get_observer_target</code></td></tr>
+<tr><td><code>get_view_offset</code></td><td><code>player_get_view_offset</code></td></tr>
+<tr><td><code>get_punch_angle</code></td><td><code>player_get_punch_angle</code></td></tr>
+<tr><td><code>get_punch_angle_vel</code></td><td><code>player_get_punch_angle_vel</code></td></tr>
+<tr><td><code>get_base_velocity</code></td><td><code>player_get_base_velocity</code></td></tr>
+<tr><td><code>get_maxspeed</code></td><td><code>player_get_maxspeed</code></td></tr>
+<tr><td><code>get_water_level</code></td><td><code>player_get_water_level</code></td></tr>
+<tr><td><code>get_tick_base</code></td><td><code>player_get_tick_base</code></td></tr>
+<tr><td><code>get_next_attack</code></td><td><code>player_get_next_attack</code></td></tr>
+<tr><td><code>get_friction</code></td><td><code>player_get_friction</code></td></tr>
+<tr><td><code>get_death_time</code></td><td><code>player_get_death_time</code></td></tr>
+<tr><td><code>get_fall_velocity</code></td><td><code>player_get_fall_velocity</code></td></tr>
+<tr><td><code>get_step_size</code></td><td><code>player_get_step_size</code></td></tr>
+<tr><td><code>get_use_entity</code></td><td><code>player_get_use_entity</code></td></tr>
+<tr><td><code>get_vehicle</code></td><td><code>player_get_vehicle</code></td></tr>
+<tr><td><code>get_ground_entity</code></td><td><code>player_get_ground_entity</code></td></tr>
+<tr><td><code>get_ladder_normal</code></td><td><code>player_get_ladder_normal</code></td></tr>
+<tr><td><code>get_buttons</code></td><td><code>player_get_buttons</code></td></tr>
+<tr><td><code>get_impulse</code></td><td><code>player_get_impulse</code></td></tr>
+<tr><td><code>get_life_state</code></td><td><code>player_get_life_state</code></td></tr>
+<tr><td><code>is_wearing_suit</code></td><td><code>player_is_wearing_suit</code></td></tr>
+<tr><td><code>is_poisoned</code></td><td><code>player_is_poisoned</code></td></tr>
+<tr><td><code>get_constraint_entity</code></td><td><code>player_get_constraint_entity</code></td></tr>
+<tr><td><code>get_constraint_center</code></td><td><code>player_get_constraint_center</code></td></tr>
+<tr><td><code>get_constraint_radius</code></td><td><code>player_get_constraint_radius</code></td></tr>
+<tr><td><code>get_constraint_width</code></td><td><code>player_get_constraint_width</code></td></tr>
+<tr><td><code>get_constraint_speed_factor</code></td><td><code>player_get_constraint_speed_factor</code></td></tr>
+<tr><td><code>is_constraint_past_radius</code></td><td><code>player_is_constraint_past_radius</code></td></tr>
+<tr><td><code>get_lagged_movement_value</code></td><td><code>player_get_lagged_movement_value</code></td></tr>
+<tr><td><code>get_tonemap_controller</code></td><td><code>player_get_tonemap_controller</code></td></tr>
+<tr><td><code>get_fov_start</code></td><td><code>player_get_fov_start</code></td></tr>
+<tr><td><code>get_fov_time</code></td><td><code>player_get_fov_time</code></td></tr>
+<tr><td><code>get_fov_rate</code></td><td><code>player_get_fov_rate</code></td></tr>
+<tr><td><code>get_zoom_owner</code></td><td><code>player_get_zoom_owner</code></td></tr>
+<tr><td><code>get_view_entity</code></td><td><code>player_get_view_entity</code></td></tr>
+<tr><td><code>get_last_weapon</code></td><td><code>player_get_last_weapon</code></td></tr>
+<tr><td><code>get_elevator</code></td><td><code>player_get_elevator</code></td></tr>
+<tr><td><code>get_bonus_progress</code></td><td><code>player_get_bonus_progress</code></td></tr>
+<tr><td><code>get_bonus_challenge</code></td><td><code>player_get_bonus_challenge</code></td></tr>
+<tr><td><code>get_view_model</code></td><td><code>player_get_view_model</code></td></tr>
+<tr><td><code>get_last_place_name</code></td><td><code>player_get_last_place_name</code></td></tr>
+<tr><td><code>get_ladder_surface_props</code></td><td><code>player_get_ladder_surface_props</code></td></tr>
+<tr><td><code>get_ef_nointerp_parity</code></td><td><code>player_get_ef_nointerp_parity</code></td></tr>
+<tr><td><code>get_postprocess_ctrl</code></td><td><code>player_get_postprocess_ctrl</code></td></tr>
+<tr><td><code>get_color_correction_ctrl</code></td><td><code>player_get_color_correction_ctrl</code></td></tr>
+<tr><td><code>is_draw_viewmodel</code></td><td><code>player_is_draw_viewmodel</code></td></tr>
+<tr><td><code>is_allow_auto_movement</code></td><td><code>player_is_allow_auto_movement</code></td></tr>
+<tr><td><code>is_auto_aim_target</code></td><td><code>player_is_auto_aim_target</code></td></tr>
+<tr><td><code>is_in_duck_jump</code></td><td><code>player_is_in_duck_jump</code></td></tr>
+<tr><td><code>get_duck_time_msecs</code></td><td><code>player_get_duck_time_msecs</code></td></tr>
+<tr><td><code>get_duck_jump_time_msecs</code></td><td><code>player_get_duck_jump_time_msecs</code></td></tr>
+<tr><td><code>get_jump_time_msecs</code></td><td><code>player_get_jump_time_msecs</code></td></tr>
+<tr><td><code>get_hide_hud</code></td><td><code>player_get_hide_hud</code></td></tr>
+<tr><td><code>get_next_think_tick</code></td><td><code>player_get_next_think_tick</code></td></tr>
+<tr><td><code>get_fon_target</code></td><td><code>player_get_fon_target</code></td></tr>
+<tr><td><code>get_button_last</code></td><td><code>player_get_button_last</code></td></tr>
+<tr><td><code>get_button_pressed</code></td><td><code>player_get_button_pressed</code></td></tr>
+<tr><td><code>get_button_released</code></td><td><code>player_get_button_released</code></td></tr>
+<tr><td><code>get_button_disabled</code></td><td><code>player_get_button_disabled</code></td></tr>
+<tr><td><code>get_button_forced</code></td><td><code>player_get_button_forced</code></td></tr>
+<tr><td><code>get_active_weapon</code></td><td><code>player_get_active_weapon</code></td></tr>
+<tr><td><code>get_skybox_scale</code></td><td><code>player_get_skybox_scale</code></td></tr>
+<tr><td><code>get_skybox_origin</code></td><td><code>player_get_skybox_origin</code></td></tr>
+<tr><td><code>get_skybox_area</code></td><td><code>player_get_skybox_area</code></td></tr>
+<tr><td><code>get_skybox_clip_3d_near_to_world_far</code></td><td><code>player_get_skybox_clip_3d_near_to_world_far</code></td></tr>
+<tr><td><code>get_skybox_clip_3d_near_to_world_far_offset</code></td><td><code>player_get_skybox_clip_3d_near_to_world_far_offset</code></td></tr>
+<tr><td><code>get_skybox_fog_enable</code></td><td><code>player_get_skybox_fog_enable</code></td></tr>
+<tr><td><code>get_skybox_fog_blend</code></td><td><code>player_get_skybox_fog_blend</code></td></tr>
+<tr><td><code>get_skybox_fog_dir_primary</code></td><td><code>player_get_skybox_fog_dir_primary</code></td></tr>
+<tr><td><code>get_skybox_fog_color_primary</code></td><td><code>player_get_skybox_fog_color_primary</code></td></tr>
+<tr><td><code>get_skybox_fog_color_secondary</code></td><td><code>player_get_skybox_fog_color_secondary</code></td></tr>
+<tr><td><code>get_skybox_fog_start</code></td><td><code>player_get_skybox_fog_start</code></td></tr>
+<tr><td><code>get_skybox_fog_end</code></td><td><code>player_get_skybox_fog_end</code></td></tr>
+<tr><td><code>get_skybox_fog_max_density</code></td><td><code>player_get_skybox_fog_max_density</code></td></tr>
+<tr><td><code>get_skybox_fog_hdr_color_scale</code></td><td><code>player_get_skybox_fog_hdr_color_scale</code></td></tr>
+<tr><td><code>get_audio_local_sound</code></td><td><code>player_get_audio_local_sound</code></td></tr>
+<tr><td><code>get_audio_soundscape_index</code></td><td><code>player_get_audio_soundscape_index</code></td></tr>
+<tr><td><code>get_audio_local_bits</code></td><td><code>player_get_audio_local_bits</code></td></tr>
+<tr><td><code>get_audio_ent_index</code></td><td><code>player_get_audio_ent_index</code></td></tr>
+<tr><td><code>set_fov</code></td><td><code>player_set_fov</code></td></tr>
+<tr><td><code>set_default_fov</code></td><td><code>player_set_default_fov</code></td></tr>
+<tr><td><code>set_fov_rate</code></td><td><code>player_set_fov_rate</code></td></tr>
+<tr><td><code>set_maxspeed</code></td><td><code>player_set_maxspeed</code></td></tr>
+<tr><td><code>set_friction</code></td><td><code>player_set_friction</code></td></tr>
+<tr><td><code>set_draw_viewmodel</code></td><td><code>player_set_draw_viewmodel</code></td></tr>
+<tr><td><code>set_hide_hud</code></td><td><code>player_set_hide_hud</code></td></tr>
+<tr><td><code>set_punch_angle</code></td><td><code>player_set_punch_angle</code></td></tr>
+<tr><td><code>set_punch_angle_vel</code></td><td><code>player_set_punch_angle_vel</code></td></tr>
+<tr><td><code>set_view_offset</code></td><td><code>player_set_view_offset</code></td></tr>
+</table>
+</div>
+<div class="sec"><h3>GAME_EVENT_META <span class="tag">(5 members)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_name</code></td><td><code>event_get_name</code></td></tr>
+<tr><td><code>get_bool</code></td><td><code>event_get_bool</code></td></tr>
+<tr><td><code>get_int</code></td><td><code>event_get_int</code></td></tr>
+<tr><td><code>get_float</code></td><td><code>event_get_float</code></td></tr>
+<tr><td><code>get_string</code></td><td><code>event_get_string</code></td></tr>
+</table>
+</div>
+<div class="sec"><h3>VECTOR_META <span class="tag">(0 members)</span></h3>
+<p class="hint">No direct members parsed.</p>
+</div>
+<h2>Global Tables / Namespaces</h2>
+<div class="sec"><h3>ProcBind <span class="tag">(23)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>GetModuleHandle</code></td><td><code>l_pb_getmodule</code></td></tr>
+<tr><td><code>GetProcAddress</code></td><td><code>l_pb_getprocaddr</code></td></tr>
+<tr><td><code>GetModuleBase</code></td><td><code>l_pb_getmodulebase</code></td></tr>
+<tr><td><code>GetModuleSize</code></td><td><code>l_pb_getmodulesize</code></td></tr>
+<tr><td><code>CreateInterface</code></td><td><code>l_pb_createinterface</code></td></tr>
+<tr><td><code>LoadLibrary</code></td><td><code>l_pb_loadlib</code></td></tr>
+<tr><td><code>FreeLibrary</code></td><td><code>l_pb_freelib</code></td></tr>
+<tr><td><code>get_prop_int</code></td><td><code>entity_get_prop_int</code></td></tr>
+<tr><td><code>get_prop_float</code></td><td><code>entity_get_prop_float</code></td></tr>
+<tr><td><code>get_prop_bool</code></td><td><code>entity_get_prop_bool</code></td></tr>
+<tr><td><code>get_prop_byte</code></td><td><code>entity_get_prop_byte</code></td></tr>
+<tr><td><code>get_prop_short</code></td><td><code>entity_get_prop_short</code></td></tr>
+<tr><td><code>get_prop_ptr</code></td><td><code>entity_get_prop_ptr</code></td></tr>
+<tr><td><code>get_prop_vec</code></td><td><code>entity_get_prop_vec</code></td></tr>
+<tr><td><code>get_prop_string</code></td><td><code>entity_get_prop_string</code></td></tr>
+<tr><td><code>get_prop_ehandle</code></td><td><code>entity_get_prop_ehandle</code></td></tr>
+<tr><td><code>set_prop_int</code></td><td><code>entity_set_prop_int</code></td></tr>
+<tr><td><code>set_prop_float</code></td><td><code>entity_set_prop_float</code></td></tr>
+<tr><td><code>set_prop_bool</code></td><td><code>entity_set_prop_bool</code></td></tr>
+<tr><td><code>set_prop_byte</code></td><td><code>entity_set_prop_byte</code></td></tr>
+<tr><td><code>set_prop_short</code></td><td><code>entity_set_prop_short</code></td></tr>
+<tr><td><code>set_prop_vec</code></td><td><code>entity_set_prop_vec</code></td></tr>
+<tr><td><code>get_address</code></td><td><code>entity_get_address</code></td></tr>
+</table></div>
+<div class="sec"><h3>anonymous table <span class="tag">(4)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>play</code></td><td><code>playsound_play</code></td></tr>
+<tr><td><code>stop</code></td><td><code>playsound_stop</code></td></tr>
+<tr><td><code>play_memory</code></td><td><code>playsound_play_memory</code></td></tr>
+<tr><td><code>system</code></td><td><code>playsound_system</code></td></tr>
+</table></div>
+<div class="sec"><h3>anonymous table <span class="tag">(20)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_screen_size</code></td><td><code>engine_get_screen_size</code></td></tr>
+<tr><td><code>get_view_angles</code></td><td><code>engine_get_view_angles</code></td></tr>
+<tr><td><code>set_view_angles</code></td><td><code>engine_set_view_angles</code></td></tr>
+<tr><td><code>get_max_clients</code></td><td><code>engine_get_max_clients</code></td></tr>
+<tr><td><code>is_in_game</code></td><td><code>engine_is_in_game</code></td></tr>
+<tr><td><code>is_connected</code></td><td><code>engine_is_connected</code></td></tr>
+<tr><td><code>is_paused</code></td><td><code>engine_is_paused</code></td></tr>
+<tr><td><code>get_level_name</code></td><td><code>engine_get_level_name</code></td></tr>
+<tr><td><code>get_level_name_short</code></td><td><code>engine_get_level_name_short</code></td></tr>
+<tr><td><code>get_player_info</code></td><td><code>engine_get_player_info</code></td></tr>
+<tr><td><code>execute_client_cmd</code></td><td><code>engine_execute_client_cmd</code></td></tr>
+<tr><td><code>is_taking_screenshot</code></td><td><code>engine_is_taking_screenshot</code></td></tr>
+<tr><td><code>is_hltv</code></td><td><code>engine_is_hltv</code></td></tr>
+<tr><td><code>get_timescale</code></td><td><code>engine_get_timescale</code></td></tr>
+<tr><td><code>is_playing_demo</code></td><td><code>engine_is_playing_demo</code></td></tr>
+<tr><td><code>is_recording_demo</code></td><td><code>engine_is_recording_demo</code></td></tr>
+<tr><td><code>get_app_id</code></td><td><code>engine_get_app_id</code></td></tr>
+<tr><td><code>get_player_for_userid</code></td><td><code>engine_get_player_for_userid</code></td></tr>
+<tr><td><code>get_net_channel_info</code></td><td><code>engine_get_net_channel_info</code></td></tr>
+<tr><td><code>get_netchan_ptr</code></td><td><code>engine_get_netchan_ptr</code></td></tr>
+</table></div>
+<div class="sec"><h3>audio <span class="tag">(2)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_volume</code></td><td><code>Lua_GetSystemVolume</code></td></tr>
+<tr><td><code>set_volume</code></td><td><code>Lua_SetSystemVolume</code></td></tr>
+</table></div>
+<div class="sec"><h3>chat <span class="tag">(114)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>print</code></td><td><code>chat_print</code></td></tr>
+<tr><td><code>get_last_speaker_index</code></td><td><code>chat_get_last_speaker_index</code></td></tr>
+<tr><td><code>is_console_visible</code></td><td><code>engine_is_console_visible</code></td></tr>
+<tr><td><code>con_nprintf</code></td><td><code>engine_con_nprintf</code></td></tr>
+<tr><td><code>get_map_entities_string</code></td><td><code>engine_get_map_entities_string</code></td></tr>
+<tr><td><code>get_game_directory</code></td><td><code>engine_get_game_directory</code></td></tr>
+<tr><td><code>server_cmd</code></td><td><code>engine_server_cmd</code></td></tr>
+<tr><td><code>get_product_version</code></td><td><code>engine_get_product_version</code></td></tr>
+<tr><td><code>get_engine_build_number</code></td><td><code>engine_get_engine_build_number</code></td></tr>
+<tr><td><code>write_screenshot</code></td><td><code>engine_write_screenshot</code></td></tr>
+<tr><td><code>reset_demo_interpolation</code></td><td><code>engine_reset_demo_interpolation</code></td></tr>
+<tr><td><code>is_playing_time_demo</code></td><td><code>engine_is_playing_time_demo</code></td></tr>
+<tr><td><code>get_active_splitscreen_slot</code></td><td><code>engine_get_active_splitscreen_slot</code></td></tr>
+<tr><td><code>set_active_splitscreen_slot</code></td><td><code>engine_set_active_splitscreen_slot</code></td></tr>
+<tr><td><code>is_splitscreen_active</code></td><td><code>engine_is_splitscreen_active</code></td></tr>
+<tr><td><code>is_valid_splitscreen_slot</code></td><td><code>engine_is_valid_splitscreen_slot</code></td></tr>
+<tr><td><code>get_splitscreen_player</code></td><td><code>engine_get_splitscreen_player</code></td></tr>
+<tr><td><code>get_screen_aspect_ratio</code></td><td><code>engine_get_screen_aspect_ratio</code></td></tr>
+<tr><td><code>set_blur_fade</code></td><td><code>engine_set_blur_fade</code></td></tr>
+<tr><td><code>map_has_hdr_lighting</code></td><td><code>engine_map_has_hdr_lighting</code></td></tr>
+<tr><td><code>is_level_main_menu_background</code></td><td><code>engine_is_level_main_menu_background</code></td></tr>
+<tr><td><code>get_main_menu_background_name</code></td><td><code>engine_get_main_menu_background_name</code></td></tr>
+<tr><td><code>is_in_edit_mode</code></td><td><code>engine_is_in_edit_mode</code></td></tr>
+<tr><td><code>is_hammer_running</code></td><td><code>engine_is_hammer_running</code></td></tr>
+<tr><td><code>is_low_violence</code></td><td><code>engine_is_low_violence</code></td></tr>
+<tr><td><code>is_save_in_progress</code></td><td><code>engine_is_save_in_progress</code></td></tr>
+<tr><td><code>get_most_recent_save_game</code></td><td><code>engine_get_most_recent_save_game</code></td></tr>
+<tr><td><code>is_in_commentary_mode</code></td><td><code>engine_is_in_commentary_mode</code></td></tr>
+<tr><td><code>is_transitioning_to_load</code></td><td><code>engine_is_transitioning_to_load</code></td></tr>
+<tr><td><code>is_drawing_loading_image</code></td><td><code>engine_is_drawing_loading_image</code></td></tr>
+<tr><td><code>hide_loading_plaque</code></td><td><code>engine_hide_loading_plaque</code></td></tr>
+<tr><td><code>map_load_failed</code></td><td><code>engine_map_load_failed</code></td></tr>
+<tr><td><code>does_level_contain_water</code></td><td><code>engine_does_level_contain_water</code></td></tr>
+<tr><td><code>get_server_simulation_frame_time</code></td><td><code>engine_get_server_simulation_frame_time</code></td></tr>
+<tr><td><code>set_timescale</code></td><td><code>engine_set_timescale</code></td></tr>
+<tr><td><code>get_pitch_scale</code></td><td><code>engine_get_pitch_scale</code></td></tr>
+<tr><td><code>set_pitch_scale</code></td><td><code>engine_set_pitch_scale</code></td></tr>
+<tr><td><code>get_ui_language</code></td><td><code>engine_get_ui_language</code></td></tr>
+<tr><td><code>get_light_for_point</code></td><td><code>engine_get_light_for_point</code></td></tr>
+<tr><td><code>trace_line_material_and_lighting</code></td><td><code>engine_trace_line_material_and_lighting</code></td></tr>
+<tr><td><code>parse_file</code></td><td><code>engine_parse_file</code></td></tr>
+<tr><td><code>copy_local_file</code></td><td><code>engine_copy_local_file</code></td></tr>
+<tr><td><code>get_last_time_stamp</code></td><td><code>engine_get_last_time_stamp</code></td></tr>
+<tr><td><code>key_lookup_binding</code></td><td><code>engine_key_lookup_binding</code></td></tr>
+<tr><td><code>key_lookup_binding_ex</code></td><td><code>engine_key_lookup_binding_ex</code></td></tr>
+<tr><td><code>key_binding_for_key</code></td><td><code>engine_key_binding_for_key</code></td></tr>
+<tr><td><code>start_key_trap_mode</code></td><td><code>engine_start_key_trap_mode</code></td></tr>
+<tr><td><code>check_done_key_trapping</code></td><td><code>engine_check_done_key_trapping</code></td></tr>
+<tr><td><code>world_to_screen_matrix</code></td><td><code>engine_world_to_screen_matrix</code></td></tr>
+<tr><td><code>world_to_view_matrix</code></td><td><code>engine_world_to_view_matrix</code></td></tr>
+<tr><td><code>is_box_visible</code></td><td><code>engine_is_box_visible</code></td></tr>
+<tr><td><code>is_box_in_view_cluster</code></td><td><code>engine_is_box_in_view_cluster</code></td></tr>
+<tr><td><code>cull_box</code></td><td><code>engine_cull_box</code></td></tr>
+<tr><td><code>sound_extra_update</code></td><td><code>engine_sound_extra_update</code></td></tr>
+<tr><td><code>game_lump_version</code></td><td><code>engine_game_lump_version</code></td></tr>
+<tr><td><code>game_lump_size</code></td><td><code>engine_game_lump_size</code></td></tr>
+<tr><td><code>level_leaf_count</code></td><td><code>engine_level_leaf_count</code></td></tr>
+<tr><td><code>linear_to_gamma</code></td><td><code>engine_linear_to_gamma</code></td></tr>
+<tr><td><code>light_style_value</code></td><td><code>engine_light_style_value</code></td></tr>
+<tr><td><code>compute_dynamic_lighting</code></td><td><code>engine_compute_dynamic_lighting</code></td></tr>
+<tr><td><code>get_ambient_light_color</code></td><td><code>engine_get_ambient_light_color</code></td></tr>
+<tr><td><code>get_dx_support_level</code></td><td><code>engine_get_dx_support_level</code></td></tr>
+<tr><td><code>supports_hdr</code></td><td><code>engine_supports_hdr</code></td></tr>
+<tr><td><code>get_chapter_name</code></td><td><code>engine_get_chapter_name</code></td></tr>
+<tr><td><code>stats_begin_frame</code></td><td><code>engine_stats_begin_frame</code></td></tr>
+<tr><td><code>stats_end_frame</code></td><td><code>engine_stats_end_frame</code></td></tr>
+<tr><td><code>fire_events</code></td><td><code>engine_fire_events</code></td></tr>
+<tr><td><code>does_box_touch_area_frustum</code></td><td><code>engine_does_box_touch_area_frustum</code></td></tr>
+<tr><td><code>sentence_group_pick</code></td><td><code>engine_sentence_group_pick</code></td></tr>
+<tr><td><code>sentence_group_pick_sequential</code></td><td><code>engine_sentence_group_pick_sequential</code></td></tr>
+<tr><td><code>sentence_index_from_name</code></td><td><code>engine_sentence_index_from_name</code></td></tr>
+<tr><td><code>sentence_name_from_index</code></td><td><code>engine_sentence_name_from_index</code></td></tr>
+<tr><td><code>sentence_group_index_from_name</code></td><td><code>engine_sentence_group_index_from_name</code></td></tr>
+<tr><td><code>sentence_group_name_from_index</code></td><td><code>engine_sentence_group_name_from_index</code></td></tr>
+<tr><td><code>sentence_length</code></td><td><code>engine_sentence_length</code></td></tr>
+<tr><td><code>compute_lighting</code></td><td><code>engine_compute_lighting</code></td></tr>
+<tr><td><code>activate_occluder</code></td><td><code>engine_activate_occluder</code></td></tr>
+<tr><td><code>is_occluded</code></td><td><code>engine_is_occluded</code></td></tr>
+<tr><td><code>check_point</code></td><td><code>engine_check_point</code></td></tr>
+<tr><td><code>draw_portals</code></td><td><code>engine_draw_portals</code></td></tr>
+<tr><td><code>is_skybox_visible_from_point</code></td><td><code>engine_is_skybox_visible_from_point</code></td></tr>
+<tr><td><code>grab_pre_color_corrected_frame</code></td><td><code>engine_grab_pre_color_corrected_frame</code></td></tr>
+<tr><td><code>get_light_for_point_fast</code></td><td><code>engine_get_light_for_point_fast</code></td></tr>
+<tr><td><code>set_restrict_server_commands</code></td><td><code>engine_set_restrict_server_commands</code></td></tr>
+<tr><td><code>set_restrict_client_commands</code></td><td><code>engine_set_restrict_client_commands</code></td></tr>
+<tr><td><code>copy_frame_buffer_to_material</code></td><td><code>engine_copy_frame_buffer_to_material</code></td></tr>
+<tr><td><code>read_configuration</code></td><td><code>engine_read_configuration</code></td></tr>
+<tr><td><code>get_achievement_mgr</code></td><td><code>engine_get_achievement_mgr</code></td></tr>
+<tr><td><code>start_xbox_exiting_process</code></td><td><code>engine_start_xbox_exiting_process</code></td></tr>
+<tr><td><code>on_storage_device_attached</code></td><td><code>engine_on_storage_device_attached</code></td></tr>
+<tr><td><code>on_storage_device_detached</code></td><td><code>engine_on_storage_device_detached</code></td></tr>
+<tr><td><code>set_local_player_is_resolvable</code></td><td><code>engine_set_local_player_is_resolvable</code></td></tr>
+<tr><td><code>is_local_player_resolvable</code></td><td><code>engine_is_local_player_resolvable</code></td></tr>
+<tr><td><code>first_valid_splitscreen_slot</code></td><td><code>engine_first_valid_splitscreen_slot</code></td></tr>
+<tr><td><code>next_valid_splitscreen_slot</code></td><td><code>engine_next_valid_splitscreen_slot</code></td></tr>
+<tr><td><code>set_leaf_flag</code></td><td><code>engine_set_leaf_flag</code></td></tr>
+<tr><td><code>recalculate_bsp_leaf_flags</code></td><td><code>engine_recalculate_bsp_leaf_flags</code></td></tr>
+<tr><td><code>dsp_get_current_das_room_new</code></td><td><code>engine_dsp_get_current_das_room_new</code></td></tr>
+<tr><td><code>dsp_get_current_das_room_changed</code></td><td><code>engine_dsp_get_current_das_room_changed</code></td></tr>
+<tr><td><code>dsp_get_current_das_room_sky_above</code></td><td><code>engine_dsp_get_current_das_room_sky_above</code></td></tr>
+<tr><td><code>dsp_get_current_das_room_sky_percent</code></td><td><code>engine_dsp_get_current_das_room_sky_percent</code></td></tr>
+<tr><td><code>set_mix_group_of_current_mixer</code></td><td><code>engine_set_mix_group_of_current_mixer</code></td></tr>
+<tr><td><code>get_mix_layer_index</code></td><td><code>engine_get_mix_layer_index</code></td></tr>
+<tr><td><code>set_mix_layer_level</code></td><td><code>engine_set_mix_layer_level</code></td></tr>
+<tr><td><code>is_creating_reslist</code></td><td><code>engine_is_creating_reslist</code></td></tr>
+<tr><td><code>is_creating_xbox_reslist</code></td><td><code>engine_is_creating_xbox_reslist</code></td></tr>
+<tr><td><code>get_gamestats_data</code></td><td><code>engine_get_gamestats_data</code></td></tr>
+<tr><td><code>update_d_and_e_lights</code></td><td><code>engine_update_d_and_e_lights</code></td></tr>
+<tr><td><code>get_bug_submission_count</code></td><td><code>engine_get_bug_submission_count</code></td></tr>
+<tr><td><code>clear_bug_submission_count</code></td><td><code>engine_clear_bug_submission_count</code></td></tr>
+<tr><td><code>search_paths_changed_after_install</code></td><td><code>engine_search_paths_changed_after_install</code></td></tr>
+<tr><td><code>configure_system_level</code></td><td><code>engine_configure_system_level</code></td></tr>
+<tr><td><code>set_connection_password</code></td><td><code>engine_set_connection_password</code></td></tr>
+<tr><td><code>get_steam_api_context</code></td><td><code>engine_get_steam_api_context</code></td></tr>
+</table></div>
+<div class="sec"><h3>client <span class="tag">(79)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>set_enable</code></td><td><code>stencil_state_set_enable</code></td></tr>
+<tr><td><code>get_enable</code></td><td><code>stencil_state_get_enable</code></td></tr>
+<tr><td><code>set_fail_op</code></td><td><code>stencil_state_set_fail_op</code></td></tr>
+<tr><td><code>get_fail_op</code></td><td><code>stencil_state_get_fail_op</code></td></tr>
+<tr><td><code>set_zfail_op</code></td><td><code>stencil_state_set_zfail_op</code></td></tr>
+<tr><td><code>get_zfail_op</code></td><td><code>stencil_state_get_zfail_op</code></td></tr>
+<tr><td><code>set_pass_op</code></td><td><code>stencil_state_set_pass_op</code></td></tr>
+<tr><td><code>get_pass_op</code></td><td><code>stencil_state_get_pass_op</code></td></tr>
+<tr><td><code>set_compare_func</code></td><td><code>stencil_state_set_compare_func</code></td></tr>
+<tr><td><code>get_compare_func</code></td><td><code>stencil_state_get_compare_func</code></td></tr>
+<tr><td><code>set_reference_value</code></td><td><code>stencil_state_set_reference_value</code></td></tr>
+<tr><td><code>get_reference_value</code></td><td><code>stencil_state_get_reference_value</code></td></tr>
+<tr><td><code>set_test_mask</code></td><td><code>stencil_state_set_test_mask</code></td></tr>
+<tr><td><code>get_test_mask</code></td><td><code>stencil_state_get_test_mask</code></td></tr>
+<tr><td><code>set_write_mask</code></td><td><code>stencil_state_set_write_mask</code></td></tr>
+<tr><td><code>get_write_mask</code></td><td><code>stencil_state_get_write_mask</code></td></tr>
+<tr><td><code>set_type</code></td><td><code>light_desc_set_type</code></td></tr>
+<tr><td><code>get_type</code></td><td><code>light_desc_get_type</code></td></tr>
+<tr><td><code>set_color</code></td><td><code>light_desc_set_color</code></td></tr>
+<tr><td><code>get_color</code></td><td><code>light_desc_get_color</code></td></tr>
+<tr><td><code>set_position</code></td><td><code>light_desc_set_position</code></td></tr>
+<tr><td><code>get_position</code></td><td><code>light_desc_get_position</code></td></tr>
+<tr><td><code>set_direction</code></td><td><code>light_desc_set_direction</code></td></tr>
+<tr><td><code>get_direction</code></td><td><code>light_desc_get_direction</code></td></tr>
+<tr><td><code>set_range</code></td><td><code>light_desc_set_range</code></td></tr>
+<tr><td><code>get_range</code></td><td><code>light_desc_get_range</code></td></tr>
+<tr><td><code>set_falloff</code></td><td><code>light_desc_set_falloff</code></td></tr>
+<tr><td><code>get_falloff</code></td><td><code>light_desc_get_falloff</code></td></tr>
+<tr><td><code>set_attenuation</code></td><td><code>light_desc_set_attenuation</code></td></tr>
+<tr><td><code>get_attenuation</code></td><td><code>light_desc_get_attenuation</code></td></tr>
+<tr><td><code>set_theta</code></td><td><code>light_desc_set_theta</code></td></tr>
+<tr><td><code>get_theta</code></td><td><code>light_desc_get_theta</code></td></tr>
+<tr><td><code>set_phi</code></td><td><code>light_desc_set_phi</code></td></tr>
+<tr><td><code>get_phi</code></td><td><code>light_desc_get_phi</code></td></tr>
+<tr><td><code>set_flags</code></td><td><code>light_desc_set_flags</code></td></tr>
+<tr><td><code>get_flags</code></td><td><code>light_desc_get_flags</code></td></tr>
+<tr><td><code>set_origin</code></td><td><code>model_render_info_set_origin</code></td></tr>
+<tr><td><code>get_origin</code></td><td><code>model_render_info_get_origin</code></td></tr>
+<tr><td><code>set_angles</code></td><td><code>model_render_info_set_angles</code></td></tr>
+<tr><td><code>get_angles</code></td><td><code>model_render_info_get_angles</code></td></tr>
+<tr><td><code>set_entity_index</code></td><td><code>model_render_info_set_entity_index</code></td></tr>
+<tr><td><code>get_entity_index</code></td><td><code>model_render_info_get_entity_index</code></td></tr>
+<tr><td><code>set_skin</code></td><td><code>model_render_info_set_skin</code></td></tr>
+<tr><td><code>get_skin</code></td><td><code>model_render_info_get_skin</code></td></tr>
+<tr><td><code>set_body</code></td><td><code>model_render_info_set_body</code></td></tr>
+<tr><td><code>get_body</code></td><td><code>model_render_info_get_body</code></td></tr>
+<tr><td><code>set_hitboxset</code></td><td><code>model_render_info_set_hitboxset</code></td></tr>
+<tr><td><code>get_hitboxset</code></td><td><code>model_render_info_get_hitboxset</code></td></tr>
+<tr><td><code>set_flags</code></td><td><code>model_render_info_set_flags</code></td></tr>
+<tr><td><code>get_flags</code></td><td><code>model_render_info_get_flags</code></td></tr>
+<tr><td><code>set_draw_flags</code></td><td><code>draw_model_state_set_draw_flags</code></td></tr>
+<tr><td><code>get_draw_flags</code></td><td><code>draw_model_state_get_draw_flags</code></td></tr>
+<tr><td><code>set_lod</code></td><td><code>draw_model_state_set_lod</code></td></tr>
+<tr><td><code>get_lod</code></td><td><code>draw_model_state_get_lod</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>studiohdr_get_name</code></td></tr>
+<tr><td><code>get_numbones</code></td><td><code>studiohdr_get_numbones</code></td></tr>
+<tr><td><code>get_bone</code></td><td><code>studiohdr_get_bone</code></td></tr>
+<tr><td><code>get_numhitboxsets</code></td><td><code>studiohdr_get_numhitboxsets</code></td></tr>
+<tr><td><code>get_hitboxset</code></td><td><code>studiohdr_get_hitboxset</code></td></tr>
+<tr><td><code>get_hitbox_count</code></td><td><code>studiohdr_get_hitbox_count</code></td></tr>
+<tr><td><code>get_eyeposition</code></td><td><code>studiohdr_get_eyeposition</code></td></tr>
+<tr><td><code>get_hull_min</code></td><td><code>studiohdr_get_hull_min</code></td></tr>
+<tr><td><code>get_hull_max</code></td><td><code>studiohdr_get_hull_max</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>studiobone_get_name</code></td></tr>
+<tr><td><code>get_parent</code></td><td><code>studiobone_get_parent</code></td></tr>
+<tr><td><code>get_flags</code></td><td><code>studiobone_get_flags</code></td></tr>
+<tr><td><code>get_pos</code></td><td><code>studiobone_get_pos</code></td></tr>
+<tr><td><code>get_contents</code></td><td><code>studiobone_get_contents</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>studiohitboxset_get_name</code></td></tr>
+<tr><td><code>get_numhitboxes</code></td><td><code>studiohitboxset_get_numhitboxes</code></td></tr>
+<tr><td><code>get_hitbox</code></td><td><code>studiohitboxset_get_hitbox</code></td></tr>
+<tr><td><code>get_bone</code></td><td><code>studiohitbox_get_bone</code></td></tr>
+<tr><td><code>get_group</code></td><td><code>studiohitbox_get_group</code></td></tr>
+<tr><td><code>get_bbmin</code></td><td><code>studiohitbox_get_bbmin</code></td></tr>
+<tr><td><code>get_bbmax</code></td><td><code>studiohitbox_get_bbmax</code></td></tr>
+<tr><td><code>get_radius</code></td><td><code>studiohitbox_get_radius</code></td></tr>
+<tr><td><code>setup_bones</code></td><td><code>entity_setup_bones</code></td></tr>
+<tr><td><code>get_bone_position</code></td><td><code>entity_get_bone_position</code></td></tr>
+<tr><td><code>get_studiohdr</code></td><td><code>entity_get_studiohdr</code></td></tr>
+</table></div>
+<div class="sec"><h3>cvar <span class="tag">(12)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>find</code></td><td><code>cvar_find</code></td></tr>
+<tr><td><code>get_int</code></td><td><code>cvar_get_int</code></td></tr>
+<tr><td><code>get_float</code></td><td><code>cvar_get_float</code></td></tr>
+<tr><td><code>get_string</code></td><td><code>cvar_get_string</code></td></tr>
+<tr><td><code>set_int</code></td><td><code>cvar_set_int</code></td></tr>
+<tr><td><code>set_float</code></td><td><code>cvar_set_float</code></td></tr>
+<tr><td><code>set_string</code></td><td><code>cvar_set_string</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>cvar_get_name</code></td></tr>
+<tr><td><code>get_flags</code></td><td><code>cvar_get_flags</code></td></tr>
+<tr><td><code>set_flags</code></td><td><code>cvar_set_flags</code></td></tr>
+<tr><td><code>add_flags</code></td><td><code>cvar_add_flags</code></td></tr>
+<tr><td><code>remove_flags</code></td><td><code>cvar_remove_flags</code></td></tr>
+</table></div>
+<div class="sec"><h3>cvar_vars <span class="tag">(16)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_int</code></td><td><code>cvar_vars_get_int</code></td></tr>
+<tr><td><code>set_int</code></td><td><code>cvar_vars_set_int</code></td></tr>
+<tr><td><code>get_bool</code></td><td><code>cvar_vars_get_bool</code></td></tr>
+<tr><td><code>set_bool</code></td><td><code>cvar_vars_set_bool</code></td></tr>
+<tr><td><code>get_float</code></td><td><code>cvar_vars_get_float</code></td></tr>
+<tr><td><code>set_float</code></td><td><code>cvar_vars_set_float</code></td></tr>
+<tr><td><code>get_intf_float</code></td><td><code>cvar_interface_get_float</code></td></tr>
+<tr><td><code>set_intf_float</code></td><td><code>cvar_interface_set_float</code></td></tr>
+<tr><td><code>get_intf_int</code></td><td><code>cvar_interface_get_int</code></td></tr>
+<tr><td><code>set_intf_int</code></td><td><code>cvar_interface_set_int</code></td></tr>
+<tr><td><code>get_string</code></td><td><code>cvar_vars_get_string</code></td></tr>
+<tr><td><code>set_string</code></td><td><code>cvar_vars_set_string</code></td></tr>
+<tr><td><code>get_keybind</code></td><td><code>cvar_vars_get_keybind</code></td></tr>
+<tr><td><code>set_keybind</code></td><td><code>cvar_vars_set_keybind</code></td></tr>
+<tr><td><code>get_color</code></td><td><code>cvar_vars_get_color</code></td></tr>
+<tr><td><code>set_color</code></td><td><code>cvar_vars_set_color</code></td></tr>
+</table></div>
+<div class="sec"><h3>debug_overlay <span class="tag">(4)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>screen_position</code></td><td><code>debug_overlay_screen_position</code></td></tr>
+<tr><td><code>add_line</code></td><td><code>debug_overlay_add_line</code></td></tr>
+<tr><td><code>add_box</code></td><td><code>debug_overlay_add_box</code></td></tr>
+<tr><td><code>add_text</code></td><td><code>debug_overlay_add_text</code></td></tr>
+</table></div>
+<div class="sec"><h3>dpi <span class="tag">(11)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>set_extra_commands</code></td><td><code>client_set_extra_commands</code></td></tr>
+<tr><td><code>get_extra_commands</code></td><td><code>client_get_extra_commands</code></td></tr>
+<tr><td><code>get_chainsaw_cycles</code></td><td><code>client_get_chainsaw_cycles</code></td></tr>
+<tr><td><code>get_by_index_raw</code></td><td><code>entity_get_by_index_raw</code></td></tr>
+<tr><td><code>is_dormant</code></td><td><code>entity_is_dormant</code></td></tr>
+<tr><td><code>get_class_id_from_ptr</code></td><td><code>entity_get_class_id_from_ptr</code></td></tr>
+<tr><td><code>is_zombie_from_ptr</code></td><td><code>entity_is_zombie_from_ptr</code></td></tr>
+<tr><td><code>valid_entity_from_ptr</code></td><td><code>entity_valid_entity_from_ptr</code></td></tr>
+<tr><td><code>get_sequence_from_ptr</code></td><td><code>entity_get_sequence_from_ptr</code></td></tr>
+<tr><td><code>get_solid_flags_from_ptr</code></td><td><code>entity_get_solid_flags_from_ptr</code></td></tr>
+<tr><td><code>is_alive_from_ptr</code></td><td><code>entity_is_alive_from_ptr</code></td></tr>
+</table></div>
+<div class="sec"><h3>draw <span class="tag">(11)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>string</code></td><td><code>draw_string</code></td></tr>
+<tr><td><code>line</code></td><td><code>draw_line</code></td></tr>
+<tr><td><code>rect</code></td><td><code>draw_rect</code></td></tr>
+<tr><td><code>outlined_rect</code></td><td><code>draw_outlined_rect</code></td></tr>
+<tr><td><code>gradient_rect</code></td><td><code>draw_gradient_rect</code></td></tr>
+<tr><td><code>circle</code></td><td><code>draw_circle</code></td></tr>
+<tr><td><code>outlined_circle</code></td><td><code>draw_outlined_circle</code></td></tr>
+<tr><td><code>triangle</code></td><td><code>draw_triangle</code></td></tr>
+<tr><td><code>get_text_width</code></td><td><code>draw_get_text_width</code></td></tr>
+<tr><td><code>get_font_height</code></td><td><code>draw_get_font_height</code></td></tr>
+<tr><td><code>get_screen_size</code></td><td><code>draw_get_screen_size</code></td></tr>
+</table></div>
+<div class="sec"><h3>entity <span class="tag">(3)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_all</code></td><td><code>entity_get_all</code></td></tr>
+<tr><td><code>get_by_index</code></td><td><code>entity_get_by_index</code></td></tr>
+<tr><td><code>get_player_count</code></td><td><code>entity_get_player_count</code></td></tr>
+</table></div>
+<div class="sec"><h3>events <span class="tag">(1)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>register</code></td><td><code>events_register</code></td></tr>
+</table></div>
+<div class="sec"><h3>file <span class="tag">(4)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>write</code></td><td><code>Lua_WriteFile</code></td></tr>
+<tr><td><code>read</code></td><td><code>Lua_ReadFile</code></td></tr>
+<tr><td><code>exists</code></td><td><code>Lua_FileExists</code></td></tr>
+<tr><td><code>create_directory</code></td><td><code>Lua_CreateDirectory</code></td></tr>
+</table></div>
+<div class="sec"><h3>fog <span class="tag">(33)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>set_enable</code></td><td><code>fog_set_enable</code></td></tr>
+<tr><td><code>set_blend</code></td><td><code>fog_set_blend</code></td></tr>
+<tr><td><code>set_dir_primary</code></td><td><code>fog_set_dir_primary</code></td></tr>
+<tr><td><code>set_color_primary</code></td><td><code>fog_set_color_primary</code></td></tr>
+<tr><td><code>set_color_secondary</code></td><td><code>fog_set_color_secondary</code></td></tr>
+<tr><td><code>set_start</code></td><td><code>fog_set_start</code></td></tr>
+<tr><td><code>set_end</code></td><td><code>fog_set_end</code></td></tr>
+<tr><td><code>set_max_density</code></td><td><code>fog_set_max_density</code></td></tr>
+<tr><td><code>set_hdr_color_scale</code></td><td><code>fog_set_hdr_color_scale</code></td></tr>
+<tr><td><code>disable</code></td><td><code>fog_disable</code></td></tr>
+<tr><td><code>get_health</code></td><td><code>player_get_health</code></td></tr>
+<tr><td><code>get_max_health</code></td><td><code>player_get_max_health</code></td></tr>
+<tr><td><code>get_origin</code></td><td><code>player_get_origin</code></td></tr>
+<tr><td><code>get_eye_position</code></td><td><code>player_get_eye_position</code></td></tr>
+<tr><td><code>get_eye_angles</code></td><td><code>player_get_eye_angles</code></td></tr>
+<tr><td><code>is_alive</code></td><td><code>player_is_alive</code></td></tr>
+<tr><td><code>get_team</code></td><td><code>player_get_team</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>player_get_name</code></td></tr>
+<tr><td><code>get_index</code></td><td><code>player_get_index</code></td></tr>
+<tr><td><code>get_zombie_class</code></td><td><code>player_get_zombie_class</code></td></tr>
+<tr><td><code>is_incapacitated</code></td><td><code>player_is_incapacitated</code></td></tr>
+<tr><td><code>get_velocity</code></td><td><code>player_get_velocity</code></td></tr>
+<tr><td><code>is_on_ground</code></td><td><code>player_is_on_ground</code></td></tr>
+<tr><td><code>is_ducking</code></td><td><code>player_is_ducking</code></td></tr>
+<tr><td><code>get_survivor_character</code></td><td><code>player_get_survivor_character</code></td></tr>
+<tr><td><code>is_ghost</code></td><td><code>player_is_ghost</code></td></tr>
+<tr><td><code>get_health_buffer</code></td><td><code>player_get_health_buffer</code></td></tr>
+<tr><td><code>get_class_id</code></td><td><code>player_get_class_id</code></td></tr>
+<tr><td><code>is_zombie</code></td><td><code>player_is_zombie</code></td></tr>
+<tr><td><code>get_sequence_name</code></td><td><code>player_get_sequence_name</code></td></tr>
+<tr><td><code>get_solid_flags</code></td><td><code>player_get_solid_flags</code></td></tr>
+<tr><td><code>get_move_type</code></td><td><code>player_get_move_type</code></td></tr>
+<tr><td><code>valid_entity</code></td><td><code>player_valid_entity</code></td></tr>
+</table></div>
+<div class="sec"><h3>get_global_vars <span class="tag">(14)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>print</code></td><td><code>client_print</code></td></tr>
+<tr><td><code>exec</code></td><td><code>client_exec</code></td></tr>
+<tr><td><code>execnormal</code></td><td><code>client_exec_cmdnormal</code></td></tr>
+<tr><td><code>get_local_player</code></td><td><code>client_get_local_player</code></td></tr>
+<tr><td><code>get_tick_count</code></td><td><code>client_get_tick_count</code></td></tr>
+<tr><td><code>get_frame_time</code></td><td><code>client_get_frame_time</code></td></tr>
+<tr><td><code>set_shared_bool</code></td><td><code>client_set_shared_bool</code></td></tr>
+<tr><td><code>get_shared_bool</code></td><td><code>client_get_shared_bool</code></td></tr>
+<tr><td><code>set_shared_int</code></td><td><code>client_set_shared_int</code></td></tr>
+<tr><td><code>get_shared_int</code></td><td><code>client_get_shared_int</code></td></tr>
+<tr><td><code>set_shared_float</code></td><td><code>client_set_shared_float</code></td></tr>
+<tr><td><code>get_shared_float</code></td><td><code>client_get_shared_float</code></td></tr>
+<tr><td><code>set_send_packet</code></td><td><code>client_set_send_packet</code></td></tr>
+<tr><td><code>get_send_packet</code></td><td><code>client_get_send_packet</code></td></tr>
+</table></div>
+<div class="sec"><h3>hooks <span class="tag">(8)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>create</code></td><td><code>hooks_create</code></td></tr>
+<tr><td><code>remove</code></td><td><code>hooks_remove</code></td></tr>
+<tr><td><code>enable</code></td><td><code>hooks_enable</code></td></tr>
+<tr><td><code>disable</code></td><td><code>hooks_disable</code></td></tr>
+<tr><td><code>call_original</code></td><td><code>hooks_call_original</code></td></tr>
+<tr><td><code>get_module_base</code></td><td><code>memory_get_module_base</code></td></tr>
+<tr><td><code>pattern_scan</code></td><td><code>memory_pattern_scan</code></td></tr>
+<tr><td><code>find_pattern</code></td><td><code>hooks_find_pattern</code></td></tr>
+</table></div>
+<div class="sec"><h3>image <span class="tag">(10)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>load</code></td><td><code>image_load</code></td></tr>
+<tr><td><code>unload</code></td><td><code>image_unload</code></td></tr>
+<tr><td><code>get_size</code></td><td><code>image_get_size</code></td></tr>
+<tr><td><code>is_loaded</code></td><td><code>image_is_loaded</code></td></tr>
+<tr><td><code>image</code></td><td><code>imgui_image</code></td></tr>
+<tr><td><code>image_button</code></td><td><code>imgui_image_button</code></td></tr>
+<tr><td><code>normalize_angle</code></td><td><code>math_normalize_angle</code></td></tr>
+<tr><td><code>angle_diff</code></td><td><code>math_angle_diff</code></td></tr>
+<tr><td><code>clamp</code></td><td><code>math_clamp</code></td></tr>
+<tr><td><code>lerp</code></td><td><code>math_lerp</code></td></tr>
+</table></div>
+<div class="sec"><h3>input <span class="tag">(32)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>is_key_down</code></td><td><code>input_is_key_down</code></td></tr>
+<tr><td><code>is_key_pressed</code></td><td><code>input_is_key_pressed</code></td></tr>
+<tr><td><code>is_key_released</code></td><td><code>input_is_key_released</code></td></tr>
+<tr><td><code>get_cursor_pos</code></td><td><code>input_get_cursor_pos</code></td></tr>
+<tr><td><code>get_current_spread</code></td><td><code>terrorweapon_get_current_spread</code></td></tr>
+<tr><td><code>can_primary_attack</code></td><td><code>terrorweapon_can_primary_attack</code></td></tr>
+<tr><td><code>can_secondary_attack</code></td><td><code>terrorweapon_can_secondary_attack</code></td></tr>
+<tr><td><code>update_spread</code></td><td><code>terrorweapon_update_spread</code></td></tr>
+<tr><td><code>is_no_spread_weapon</code></td><td><code>terrorweapon_is_no_spread_weapon</code></td></tr>
+<tr><td><code>get_duration</code></td><td><code>terrorweapon_get_duration</code></td></tr>
+<tr><td><code>get_timestamp</code></td><td><code>terrorweapon_get_timestamp</code></td></tr>
+<tr><td><code>get_helping_hand_state</code></td><td><code>terrorweapon_get_helping_hand_state</code></td></tr>
+<tr><td><code>get_helping_hand_target</code></td><td><code>terrorweapon_get_helping_hand_target</code></td></tr>
+<tr><td><code>get_helping_hand_extend_duration</code></td><td><code>terrorweapon_get_helping_hand_extend_duration</code></td></tr>
+<tr><td><code>get_reload_queued_start_time</code></td><td><code>terrorweapon_get_reload_queued_start_time</code></td></tr>
+<tr><td><code>is_holding_fire_button</code></td><td><code>terrorweapon_is_holding_fire_button</code></td></tr>
+<tr><td><code>is_holding_alt_fire_button</code></td><td><code>terrorweapon_is_holding_alt_fire_button</code></td></tr>
+<tr><td><code>released_fire_button</code></td><td><code>terrorweapon_released_fire_button</code></td></tr>
+<tr><td><code>released_alt_fire_button</code></td><td><code>terrorweapon_released_alt_fire_button</code></td></tr>
+<tr><td><code>was_picked_up_on_transition</code></td><td><code>terrorweapon_was_picked_up_on_transition</code></td></tr>
+<tr><td><code>get_bloody_weapon_level</code></td><td><code>terrorweapon_get_bloody_weapon_level</code></td></tr>
+<tr><td><code>get_upgraded_primary_ammo_loaded</code></td><td><code>terrorweapon_get_upgraded_primary_ammo_loaded</code></td></tr>
+<tr><td><code>get_weapon_id</code></td><td><code>weaponspawn_get_weapon_id</code></td></tr>
+<tr><td><code>get_glow_range</code></td><td><code>weaponspawn_get_glow_range</code></td></tr>
+<tr><td><code>get_owner</code></td><td><code>mountedweapon_get_owner</code></td></tr>
+<tr><td><code>get_initial_angles</code></td><td><code>mountedweapon_get_initial_angles</code></td></tr>
+<tr><td><code>get_max_yaw</code></td><td><code>mountedweapon_get_max_yaw</code></td></tr>
+<tr><td><code>get_max_pitch</code></td><td><code>mountedweapon_get_max_pitch</code></td></tr>
+<tr><td><code>get_min_pitch</code></td><td><code>mountedweapon_get_min_pitch</code></td></tr>
+<tr><td><code>is_firing</code></td><td><code>mountedweapon_is_firing</code></td></tr>
+<tr><td><code>is_overheated</code></td><td><code>mountedweapon_is_overheated</code></td></tr>
+<tr><td><code>get_heat</code></td><td><code>mountedweapon_get_heat</code></td></tr>
+</table></div>
+<div class="sec"><h3>material_system <span class="tag">(12)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>find_material</code></td><td><code>materialsystem_find_material</code></td></tr>
+<tr><td><code>create_material</code></td><td><code>materialsystem_create_material</code></td></tr>
+<tr><td><code>find_texture</code></td><td><code>materialsystem_find_texture</code></td></tr>
+<tr><td><code>is_texture_loaded</code></td><td><code>materialsystem_is_texture_loaded</code></td></tr>
+<tr><td><code>reload_materials</code></td><td><code>materialsystem_reload_materials</code></td></tr>
+<tr><td><code>reload_textures</code></td><td><code>materialsystem_reload_textures</code></td></tr>
+<tr><td><code>get_render_context</code></td><td><code>materialsystem_get_render_context</code></td></tr>
+<tr><td><code>begin_frame</code></td><td><code>materialsystem_begin_frame</code></td></tr>
+<tr><td><code>end_frame</code></td><td><code>materialsystem_end_frame</code></td></tr>
+<tr><td><code>flush</code></td><td><code>materialsystem_flush</code></td></tr>
+<tr><td><code>get_back_buffer_dimensions</code></td><td><code>materialsystem_get_back_buffer_dimensions</code></td></tr>
+<tr><td><code>get_num_materials</code></td><td><code>materialsystem_get_num_materials</code></td></tr>
+</table></div>
+<div class="sec"><h3>materials <span class="tag">(8)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>find</code></td><td><code>materials_find</code></td></tr>
+<tr><td><code>get_all</code></td><td><code>materials_get_all</code></td></tr>
+<tr><td><code>get_texture_group</code></td><td><code>materials_get_texture_group</code></td></tr>
+<tr><td><code>get_name</code></td><td><code>materials_get_name</code></td></tr>
+<tr><td><code>color_modulate</code></td><td><code>materials_color_modulate</code></td></tr>
+<tr><td><code>alpha_modulate</code></td><td><code>materials_alpha_modulate</code></td></tr>
+<tr><td><code>set_material_var_flag</code></td><td><code>materials_set_material_var_flag</code></td></tr>
+<tr><td><code>force_override</code></td><td><code>materials_force_override</code></td></tr>
+</table></div>
+<div class="sec"><h3>memory_read_bool <span class="tag">(8)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>set_bytes</code></td><td><code>memory_set_bytes</code></td></tr>
+<tr><td><code>copy_bytes</code></td><td><code>memory_copy_bytes</code></td></tr>
+<tr><td><code>read_byte</code></td><td><code>memory_read_byte</code></td></tr>
+<tr><td><code>read_int</code></td><td><code>memory_read_int</code></td></tr>
+<tr><td><code>read_float</code></td><td><code>memory_read_float</code></td></tr>
+<tr><td><code>write_int</code></td><td><code>memory_write_int</code></td></tr>
+<tr><td><code>write_float</code></td><td><code>memory_write_float</code></td></tr>
+<tr><td><code>call_vfunc</code></td><td><code>memory_call_vfunc</code></td></tr>
+</table></div>
+<div class="sec"><h3>menu <span class="tag">(4)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>add_main_tab</code></td><td><code>menu_add_main_tab</code></td></tr>
+<tr><td><code>add_sub_tab</code></td><td><code>menu_add_sub_tab</code></td></tr>
+<tr><td><code>inject_into_subtab</code></td><td><code>menu_inject_into_subtab</code></td></tr>
+<tr><td><code>is_open</code></td><td><code>menu_is_open</code></td></tr>
+</table></div>
+<div class="sec"><h3>model_info <span class="tag">(5)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_model_name</code></td><td><code>modelinfo_get_model_name</code></td></tr>
+<tr><td><code>get_model_index</code></td><td><code>modelinfo_get_model_index</code></td></tr>
+<tr><td><code>get_studio_model</code></td><td><code>modelinfo_get_studio_model</code></td></tr>
+<tr><td><code>get_model_name</code></td><td><code>model_info_get_model_name</code></td></tr>
+<tr><td><code>get_studio_model</code></td><td><code>model_info_get_studio_model</code></td></tr>
+</table></div>
+<div class="sec"><h3>modules <span class="tag">(2)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_client_base</code></td><td><code>modules_get_client_base</code></td></tr>
+<tr><td><code>get_engine_base</code></td><td><code>modules_get_engine_base</code></td></tr>
+</table></div>
+<div class="sec"><h3>netadr <span class="tag">(9)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_port</code></td><td><code>netadr_get_port</code></td></tr>
+<tr><td><code>get_ip</code></td><td><code>netadr_get_ip</code></td></tr>
+<tr><td><code>get_ip_string</code></td><td><code>netadr_get_ip_string</code></td></tr>
+<tr><td><code>to_string</code></td><td><code>netadr_to_string</code></td></tr>
+<tr><td><code>is_localhost</code></td><td><code>netadr_is_localhost</code></td></tr>
+<tr><td><code>is_loopback</code></td><td><code>netadr_is_loopback</code></td></tr>
+<tr><td><code>is_reserved</code></td><td><code>netadr_is_reserved</code></td></tr>
+<tr><td><code>is_valid</code></td><td><code>netadr_is_valid</code></td></tr>
+<tr><td><code>get_connection_string</code></td><td><code>netadr_get_connection_string</code></td></tr>
+</table></div>
+<div class="sec"><h3>render <span class="tag">(4)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>override_material</code></td><td><code>render_override_material</code></td></tr>
+<tr><td><code>clear_override</code></td><td><code>render_clear_override</code></td></tr>
+<tr><td><code>get_current_model_info</code></td><td><code>render_get_current_model_info</code></td></tr>
+<tr><td><code>call_original_draw_model</code></td><td><code>render_call_original_draw_model</code></td></tr>
+</table></div>
+<div class="sec"><h3>set_watermark_text <span class="tag">(26)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>begin</code></td><td><code>imgui_begin</code></td></tr>
+<tr><td><code>end</code></td><td><code>imgui_end</code></td></tr>
+<tr><td><code>text</code></td><td><code>imgui_text</code></td></tr>
+<tr><td><code>text_colored</code></td><td><code>imgui_text_colored</code></td></tr>
+<tr><td><code>button</code></td><td><code>imgui_button</code></td></tr>
+<tr><td><code>checkbox</code></td><td><code>imgui_checkbox</code></td></tr>
+<tr><td><code>slider_int</code></td><td><code>imgui_slider_int</code></td></tr>
+<tr><td><code>slider_float</code></td><td><code>imgui_slider_float</code></td></tr>
+<tr><td><code>input_text</code></td><td><code>imgui_input_text</code></td></tr>
+<tr><td><code>separator</code></td><td><code>imgui_separator</code></td></tr>
+<tr><td><code>same_line</code></td><td><code>imgui_same_line</code></td></tr>
+<tr><td><code>spacing</code></td><td><code>imgui_spacing</code></td></tr>
+<tr><td><code>new_line</code></td><td><code>imgui_new_line</code></td></tr>
+<tr><td><code>begin_child</code></td><td><code>imgui_begin_child</code></td></tr>
+<tr><td><code>end_child</code></td><td><code>imgui_end_child</code></td></tr>
+<tr><td><code>columns</code></td><td><code>imgui_columns</code></td></tr>
+<tr><td><code>next_column</code></td><td><code>imgui_next_column</code></td></tr>
+<tr><td><code>get_column_index</code></td><td><code>imgui_get_column_index</code></td></tr>
+<tr><td><code>set_column_width</code></td><td><code>imgui_set_column_width</code></td></tr>
+<tr><td><code>push_item_width</code></td><td><code>imgui_push_item_width</code></td></tr>
+<tr><td><code>pop_item_width</code></td><td><code>imgui_pop_item_width</code></td></tr>
+<tr><td><code>combo</code></td><td><code>imgui_combo</code></td></tr>
+<tr><td><code>push_style_color</code></td><td><code>imgui_push_style_color</code></td></tr>
+<tr><td><code>pop_style_color</code></td><td><code>imgui_pop_style_color</code></td></tr>
+<tr><td><code>set_window_font_scale</code></td><td><code>imgui_set_window_font_scale</code></td></tr>
+<tr><td><code>set_next_window_pos</code></td><td><code>imgui_set_next_window_pos</code></td></tr>
+</table></div>
+<div class="sec"><h3>structs <span class="tag">(4)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>create_stencil_state</code></td><td><code>stencil_state_create</code></td></tr>
+<tr><td><code>create_light_desc</code></td><td><code>light_desc_create</code></td></tr>
+<tr><td><code>create_model_render_info</code></td><td><code>model_render_info_create</code></td></tr>
+<tr><td><code>create_draw_model_state</code></td><td><code>draw_model_state_create</code></td></tr>
+</table></div>
+<div class="sec"><h3>trace <span class="tag">(6)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>line</code></td><td><code>trace_line</code></td></tr>
+<tr><td><code>hull</code></td><td><code>trace_hull</code></td></tr>
+<tr><td><code>world_only</code></td><td><code>trace_world_only</code></td></tr>
+<tr><td><code>clip_ray_to_entity</code></td><td><code>trace_clip_ray_to_entity</code></td></tr>
+<tr><td><code>get_point_contents</code></td><td><code>trace_get_point_contents</code></td></tr>
+<tr><td><code>point_outside_world</code></td><td><code>trace_point_outside_world</code></td></tr>
+</table></div>
+<div class="sec"><h3>utils <span class="tag">(3)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>get_identifier</code></td><td><code>utils_get_identifier</code></td></tr>
+<tr><td><code>angle_vectors</code></td><td><code>utils_angle_vectors</code></td></tr>
+<tr><td><code>vector_normalize</code></td><td><code>utils_vector_normalize</code></td></tr>
+</table></div>
+<div class="sec"><h3>vector <span class="tag">(4)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>new</code></td><td><code>vector_new</code></td></tr>
+<tr><td><code>distance</code></td><td><code>vector_distance</code></td></tr>
+<tr><td><code>dot</code></td><td><code>vector_dot</code></td></tr>
+<tr><td><code>length</code></td><td><code>vector_length</code></td></tr>
+</table></div>
+<div class="sec"><h3>windows <span class="tag">(8)</span></h3>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>find_window</code></td><td><code>Lua_FindWindow</code></td></tr>
+<tr><td><code>send_message</code></td><td><code>Lua_SendMessage</code></td></tr>
+<tr><td><code>get_window_text</code></td><td><code>Lua_GetWindowText</code></td></tr>
+<tr><td><code>find_window_ex</code></td><td><code>Lua_FindWindowEx</code></td></tr>
+<tr><td><code>is_window_visible</code></td><td><code>Lua_IsWindowVisible</code></td></tr>
+<tr><td><code>get_process_id_by_name</code></td><td><code>Lua_GetProcessIdByName</code></td></tr>
+<tr><td><code>get_window_pid</code></td><td><code>Lua_GetWindowThreadProcessId</code></td></tr>
+<tr><td><code>post_message</code></td><td><code>Lua_PostMessage</code></td></tr>
+</table></div>
+<h2>Global Functions</h2>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>create</code></td><td><code>l_hooks_create</code></td></tr>
+<tr><td><code>enable_slot</code></td><td><code>l_hooks_enable_slot</code></td></tr>
+<tr><td><code>disable_slot</code></td><td><code>l_hooks_disable_slot</code></td></tr>
+<tr><td><code>remove_slot</code></td><td><code>l_hooks_remove_slot</code></td></tr>
+<tr><td><code>call_fn</code></td><td><code>l_hooks_call_fn</code></td></tr>
+<tr><td><code>get_vtable</code></td><td><code>l_hooks_get_vtable</code></td></tr>
+<tr><td><code>new_frame</code></td><td><code>imgui_new_frame_gen</code></td></tr>
+<tr><td><code>end_frame</code></td><td><code>imgui_end_frame_gen</code></td></tr>
+<tr><td><code>render</code></td><td><code>imgui_render_gen</code></td></tr>
+<tr><td><code>show_metrics_window</code></td><td><code>imgui_show_metrics_window_gen</code></td></tr>
+<tr><td><code>get_version</code></td><td><code>imgui_get_version_gen</code></td></tr>
+<tr><td><code>is_window_appearing</code></td><td><code>imgui_is_window_appearing_gen</code></td></tr>
+<tr><td><code>is_window_collapsed</code></td><td><code>imgui_is_window_collapsed_gen</code></td></tr>
+<tr><td><code>is_window_focused</code></td><td><code>imgui_is_window_focused_gen</code></td></tr>
+<tr><td><code>is_window_hovered</code></td><td><code>imgui_is_window_hovered_gen</code></td></tr>
+<tr><td><code>get_window_pos</code></td><td><code>imgui_get_window_pos_gen</code></td></tr>
+<tr><td><code>get_window_size</code></td><td><code>imgui_get_window_size_gen</code></td></tr>
+<tr><td><code>get_window_width</code></td><td><code>imgui_get_window_width_gen</code></td></tr>
+<tr><td><code>get_window_height</code></td><td><code>imgui_get_window_height_gen</code></td></tr>
+<tr><td><code>set_next_window_size</code></td><td><code>imgui_set_next_window_size_gen</code></td></tr>
+<tr><td><code>set_next_window_content_size</code></td><td><code>imgui_set_next_window_content_size_gen</code></td></tr>
+<tr><td><code>set_next_window_collapsed</code></td><td><code>imgui_set_next_window_collapsed_gen</code></td></tr>
+<tr><td><code>set_next_window_focus</code></td><td><code>imgui_set_next_window_focus_gen</code></td></tr>
+<tr><td><code>set_next_window_bg_alpha</code></td><td><code>imgui_set_next_window_bg_alpha_gen</code></td></tr>
+<tr><td><code>set_window_pos</code></td><td><code>imgui_set_window_pos_gen</code></td></tr>
+<tr><td><code>set_window_size</code></td><td><code>imgui_set_window_size_gen</code></td></tr>
+<tr><td><code>set_window_collapsed</code></td><td><code>imgui_set_window_collapsed_gen</code></td></tr>
+<tr><td><code>set_window_focus</code></td><td><code>imgui_set_window_focus_gen</code></td></tr>
+<tr><td><code>get_content_region_avail</code></td><td><code>imgui_get_content_region_avail_gen</code></td></tr>
+<tr><td><code>get_content_region_max</code></td><td><code>imgui_get_content_region_max_gen</code></td></tr>
+<tr><td><code>get_window_content_region_min</code></td><td><code>imgui_get_window_content_region_min_gen</code></td></tr>
+<tr><td><code>get_window_content_region_max</code></td><td><code>imgui_get_window_content_region_max_gen</code></td></tr>
+<tr><td><code>get_window_content_region_width</code></td><td><code>imgui_get_window_content_region_width_gen</code></td></tr>
+<tr><td><code>get_scroll_x</code></td><td><code>imgui_get_scroll_x_gen</code></td></tr>
+<tr><td><code>get_scroll_y</code></td><td><code>imgui_get_scroll_y_gen</code></td></tr>
+<tr><td><code>set_scroll_x</code></td><td><code>imgui_set_scroll_x_gen</code></td></tr>
+<tr><td><code>set_scroll_y</code></td><td><code>imgui_set_scroll_y_gen</code></td></tr>
+<tr><td><code>get_scroll_max_x</code></td><td><code>imgui_get_scroll_max_x_gen</code></td></tr>
+<tr><td><code>get_scroll_max_y</code></td><td><code>imgui_get_scroll_max_y_gen</code></td></tr>
+<tr><td><code>set_scroll_here_x</code></td><td><code>imgui_set_scroll_here_x_gen</code></td></tr>
+<tr><td><code>set_scroll_here_y</code></td><td><code>imgui_set_scroll_here_y_gen</code></td></tr>
+<tr><td><code>set_scroll_from_pos_x</code></td><td><code>imgui_set_scroll_from_pos_x_gen</code></td></tr>
+<tr><td><code>set_scroll_from_pos_y</code></td><td><code>imgui_set_scroll_from_pos_y_gen</code></td></tr>
+<tr><td><code>pop_font</code></td><td><code>imgui_pop_font_gen</code></td></tr>
+<tr><td><code>push_style_var</code></td><td><code>imgui_push_style_var_gen</code></td></tr>
+<tr><td><code>pop_style_var</code></td><td><code>imgui_pop_style_var_gen</code></td></tr>
+<tr><td><code>push_allow_keyboard_focus</code></td><td><code>imgui_push_allow_keyboard_focus_gen</code></td></tr>
+<tr><td><code>pop_allow_keyboard_focus</code></td><td><code>imgui_pop_allow_keyboard_focus_gen</code></td></tr>
+<tr><td><code>push_button_repeat</code></td><td><code>imgui_push_button_repeat_gen</code></td></tr>
+<tr><td><code>pop_button_repeat</code></td><td><code>imgui_pop_button_repeat_gen</code></td></tr>
+<tr><td><code>set_next_item_width</code></td><td><code>imgui_set_next_item_width_gen</code></td></tr>
+<tr><td><code>calc_item_width</code></td><td><code>imgui_calc_item_width_gen</code></td></tr>
+<tr><td><code>push_text_wrap_pos</code></td><td><code>imgui_push_text_wrap_pos_gen</code></td></tr>
+<tr><td><code>pop_text_wrap_pos</code></td><td><code>imgui_pop_text_wrap_pos_gen</code></td></tr>
+<tr><td><code>get_font_size</code></td><td><code>imgui_get_font_size_gen</code></td></tr>
+<tr><td><code>get_font_tex_uv_white_pixel</code></td><td><code>imgui_get_font_tex_uv_white_pixel_gen</code></td></tr>
+<tr><td><code>get_color_u32</code></td><td><code>imgui_get_color_u32_gen</code></td></tr>
+<tr><td><code>get_style_color_vec4</code></td><td><code>imgui_get_style_color_vec4_gen</code></td></tr>
+<tr><td><code>dummy</code></td><td><code>imgui_dummy_gen</code></td></tr>
+<tr><td><code>indent</code></td><td><code>imgui_indent_gen</code></td></tr>
+<tr><td><code>unindent</code></td><td><code>imgui_unindent_gen</code></td></tr>
+<tr><td><code>begin_group</code></td><td><code>imgui_begin_group_gen</code></td></tr>
+<tr><td><code>end_group</code></td><td><code>imgui_end_group_gen</code></td></tr>
+<tr><td><code>get_cursor_pos</code></td><td><code>imgui_get_cursor_pos_gen</code></td></tr>
+<tr><td><code>get_cursor_pos_x</code></td><td><code>imgui_get_cursor_pos_x_gen</code></td></tr>
+<tr><td><code>get_cursor_pos_y</code></td><td><code>imgui_get_cursor_pos_y_gen</code></td></tr>
+<tr><td><code>set_cursor_pos</code></td><td><code>imgui_set_cursor_pos_gen</code></td></tr>
+<tr><td><code>set_cursor_pos_x</code></td><td><code>imgui_set_cursor_pos_x_gen</code></td></tr>
+<tr><td><code>set_cursor_pos_y</code></td><td><code>imgui_set_cursor_pos_y_gen</code></td></tr>
+<tr><td><code>get_cursor_start_pos</code></td><td><code>imgui_get_cursor_start_pos_gen</code></td></tr>
+<tr><td><code>get_cursor_screen_pos</code></td><td><code>imgui_get_cursor_screen_pos_gen</code></td></tr>
+<tr><td><code>set_cursor_screen_pos</code></td><td><code>imgui_set_cursor_screen_pos_gen</code></td></tr>
+<tr><td><code>align_text_to_frame_padding</code></td><td><code>imgui_align_text_to_frame_padding_gen</code></td></tr>
+<tr><td><code>get_text_line_height</code></td><td><code>imgui_get_text_line_height_gen</code></td></tr>
+<tr><td><code>get_text_line_height_with_spacing</code></td><td><code>imgui_get_text_line_height_with_spacing_gen</code></td></tr>
+<tr><td><code>get_frame_height</code></td><td><code>imgui_get_frame_height_gen</code></td></tr>
+<tr><td><code>get_frame_height_with_spacing</code></td><td><code>imgui_get_frame_height_with_spacing_gen</code></td></tr>
+<tr><td><code>push_id</code></td><td><code>imgui_push_id_gen</code></td></tr>
+<tr><td><code>pop_id</code></td><td><code>imgui_pop_id_gen</code></td></tr>
+<tr><td><code>get_id</code></td><td><code>imgui_get_id_gen</code></td></tr>
+<tr><td><code>text_unformatted</code></td><td><code>imgui_text_unformatted_gen</code></td></tr>
+<tr><td><code>small_button</code></td><td><code>imgui_small_button_gen</code></td></tr>
+<tr><td><code>invisible_button</code></td><td><code>imgui_invisible_button_gen</code></td></tr>
+<tr><td><code>arrow_button</code></td><td><code>imgui_arrow_button_gen</code></td></tr>
+<tr><td><code>checkbox_flags</code></td><td><code>imgui_checkbox_flags_gen</code></td></tr>
+<tr><td><code>radio_button</code></td><td><code>imgui_radio_button_gen</code></td></tr>
+<tr><td><code>progress_bar</code></td><td><code>imgui_progress_bar_gen</code></td></tr>
+<tr><td><code>bullet</code></td><td><code>imgui_bullet_gen</code></td></tr>
+<tr><td><code>begin_combo</code></td><td><code>imgui_begin_combo_gen</code></td></tr>
+<tr><td><code>end_combo</code></td><td><code>imgui_end_combo_gen</code></td></tr>
+<tr><td><code>drag_float</code></td><td><code>imgui_drag_float_gen</code></td></tr>
+<tr><td><code>drag_float_range2</code></td><td><code>imgui_drag_float_range2_gen</code></td></tr>
+<tr><td><code>drag_int</code></td><td><code>imgui_drag_int_gen</code></td></tr>
+<tr><td><code>drag_int_range2</code></td><td><code>imgui_drag_int_range2_gen</code></td></tr>
+<tr><td><code>slider_angle</code></td><td><code>imgui_slider_angle_gen</code></td></tr>
+<tr><td><code>v_slider_float</code></td><td><code>imgui_v_slider_float_gen</code></td></tr>
+<tr><td><code>v_slider_int</code></td><td><code>imgui_v_slider_int_gen</code></td></tr>
+<tr><td><code>input_float</code></td><td><code>imgui_input_float_gen</code></td></tr>
+<tr><td><code>input_int</code></td><td><code>imgui_input_int_gen</code></td></tr>
+<tr><td><code>input_double</code></td><td><code>imgui_input_double_gen</code></td></tr>
+<tr><td><code>color_button</code></td><td><code>imgui_color_button_gen</code></td></tr>
+<tr><td><code>set_color_edit_options</code></td><td><code>imgui_set_color_edit_options_gen</code></td></tr>
+<tr><td><code>tree_node</code></td><td><code>imgui_tree_node_gen</code></td></tr>
+<tr><td><code>tree_node_ex</code></td><td><code>imgui_tree_node_ex_gen</code></td></tr>
+<tr><td><code>tree_push</code></td><td><code>imgui_tree_push_gen</code></td></tr>
+<tr><td><code>tree_pop</code></td><td><code>imgui_tree_pop_gen</code></td></tr>
+<tr><td><code>get_tree_node_to_label_spacing</code></td><td><code>imgui_get_tree_node_to_label_spacing_gen</code></td></tr>
+<tr><td><code>collapsing_header</code></td><td><code>imgui_collapsing_header_gen</code></td></tr>
+<tr><td><code>set_next_item_open</code></td><td><code>imgui_set_next_item_open_gen</code></td></tr>
+<tr><td><code>selectable</code></td><td><code>imgui_selectable_gen</code></td></tr>
+<tr><td><code>begin_list_box</code></td><td><code>imgui_begin_list_box_gen</code></td></tr>
+<tr><td><code>end_list_box</code></td><td><code>imgui_end_list_box_gen</code></td></tr>
+<tr><td><code>plot_lines</code></td><td><code>imgui_plot_lines_gen</code></td></tr>
+<tr><td><code>plot_histogram</code></td><td><code>imgui_plot_histogram_gen</code></td></tr>
+<tr><td><code>value</code></td><td><code>imgui_value_gen</code></td></tr>
+<tr><td><code>begin_menu_bar</code></td><td><code>imgui_begin_menu_bar_gen</code></td></tr>
+<tr><td><code>end_menu_bar</code></td><td><code>imgui_end_menu_bar_gen</code></td></tr>
+<tr><td><code>begin_main_menu_bar</code></td><td><code>imgui_begin_main_menu_bar_gen</code></td></tr>
+<tr><td><code>end_main_menu_bar</code></td><td><code>imgui_end_main_menu_bar_gen</code></td></tr>
+<tr><td><code>begin_menu</code></td><td><code>imgui_begin_menu_gen</code></td></tr>
+<tr><td><code>end_menu</code></td><td><code>imgui_end_menu_gen</code></td></tr>
+<tr><td><code>menu_item</code></td><td><code>imgui_menu_item_gen</code></td></tr>
+<tr><td><code>begin_tooltip</code></td><td><code>imgui_begin_tooltip_gen</code></td></tr>
+<tr><td><code>end_tooltip</code></td><td><code>imgui_end_tooltip_gen</code></td></tr>
+<tr><td><code>begin_popup</code></td><td><code>imgui_begin_popup_gen</code></td></tr>
+<tr><td><code>begin_popup_modal</code></td><td><code>imgui_begin_popup_modal_gen</code></td></tr>
+<tr><td><code>end_popup</code></td><td><code>imgui_end_popup_gen</code></td></tr>
+<tr><td><code>open_popup</code></td><td><code>imgui_open_popup_gen</code></td></tr>
+<tr><td><code>open_popup_on_item_click</code></td><td><code>imgui_open_popup_on_item_click_gen</code></td></tr>
+<tr><td><code>close_current_popup</code></td><td><code>imgui_close_current_popup_gen</code></td></tr>
+<tr><td><code>begin_popup_context_item</code></td><td><code>imgui_begin_popup_context_item_gen</code></td></tr>
+<tr><td><code>begin_popup_context_window</code></td><td><code>imgui_begin_popup_context_window_gen</code></td></tr>
+<tr><td><code>begin_popup_context_void</code></td><td><code>imgui_begin_popup_context_void_gen</code></td></tr>
+<tr><td><code>is_popup_open</code></td><td><code>imgui_is_popup_open_gen</code></td></tr>
+<tr><td><code>begin_table</code></td><td><code>imgui_begin_table_gen</code></td></tr>
+<tr><td><code>end_table</code></td><td><code>imgui_end_table_gen</code></td></tr>
+<tr><td><code>table_next_row</code></td><td><code>imgui_table_next_row_gen</code></td></tr>
+<tr><td><code>table_next_column</code></td><td><code>imgui_table_next_column_gen</code></td></tr>
+<tr><td><code>table_set_column_index</code></td><td><code>imgui_table_set_column_index_gen</code></td></tr>
+<tr><td><code>table_setup_column</code></td><td><code>imgui_table_setup_column_gen</code></td></tr>
+<tr><td><code>table_setup_scroll_freeze</code></td><td><code>imgui_table_setup_scroll_freeze_gen</code></td></tr>
+<tr><td><code>table_headers_row</code></td><td><code>imgui_table_headers_row_gen</code></td></tr>
+<tr><td><code>table_header</code></td><td><code>imgui_table_header_gen</code></td></tr>
+<tr><td><code>table_get_column_count</code></td><td><code>imgui_table_get_column_count_gen</code></td></tr>
+<tr><td><code>table_get_column_index</code></td><td><code>imgui_table_get_column_index_gen</code></td></tr>
+<tr><td><code>table_get_row_index</code></td><td><code>imgui_table_get_row_index_gen</code></td></tr>
+<tr><td><code>table_get_column_name</code></td><td><code>imgui_table_get_column_name_gen</code></td></tr>
+<tr><td><code>table_get_column_flags</code></td><td><code>imgui_table_get_column_flags_gen</code></td></tr>
+<tr><td><code>table_set_column_enabled</code></td><td><code>imgui_table_set_column_enabled_gen</code></td></tr>
+<tr><td><code>table_set_bg_color</code></td><td><code>imgui_table_set_bg_color_gen</code></td></tr>
+<tr><td><code>get_column_width</code></td><td><code>imgui_get_column_width_gen</code></td></tr>
+<tr><td><code>get_column_offset</code></td><td><code>imgui_get_column_offset_gen</code></td></tr>
+<tr><td><code>set_column_offset</code></td><td><code>imgui_set_column_offset_gen</code></td></tr>
+<tr><td><code>get_columns_count</code></td><td><code>imgui_get_columns_count_gen</code></td></tr>
+<tr><td><code>begin_tab_bar</code></td><td><code>imgui_begin_tab_bar_gen</code></td></tr>
+<tr><td><code>end_tab_bar</code></td><td><code>imgui_end_tab_bar_gen</code></td></tr>
+<tr><td><code>begin_tab_item</code></td><td><code>imgui_begin_tab_item_gen</code></td></tr>
+<tr><td><code>end_tab_item</code></td><td><code>imgui_end_tab_item_gen</code></td></tr>
+<tr><td><code>tab_item_button</code></td><td><code>imgui_tab_item_button_gen</code></td></tr>
+<tr><td><code>set_tab_item_closed</code></td><td><code>imgui_set_tab_item_closed_gen</code></td></tr>
+<tr><td><code>log_to_tty</code></td><td><code>imgui_log_to_tty_gen</code></td></tr>
+<tr><td><code>log_to_file</code></td><td><code>imgui_log_to_file_gen</code></td></tr>
+<tr><td><code>log_to_clipboard</code></td><td><code>imgui_log_to_clipboard_gen</code></td></tr>
+<tr><td><code>log_finish</code></td><td><code>imgui_log_finish_gen</code></td></tr>
+<tr><td><code>log_buttons</code></td><td><code>imgui_log_buttons_gen</code></td></tr>
+<tr><td><code>begin_drag_drop_source</code></td><td><code>imgui_begin_drag_drop_source_gen</code></td></tr>
+<tr><td><code>end_drag_drop_source</code></td><td><code>imgui_end_drag_drop_source_gen</code></td></tr>
+<tr><td><code>begin_drag_drop_target</code></td><td><code>imgui_begin_drag_drop_target_gen</code></td></tr>
+<tr><td><code>end_drag_drop_target</code></td><td><code>imgui_end_drag_drop_target_gen</code></td></tr>
+<tr><td><code>push_clip_rect</code></td><td><code>imgui_push_clip_rect_gen</code></td></tr>
+<tr><td><code>pop_clip_rect</code></td><td><code>imgui_pop_clip_rect_gen</code></td></tr>
+<tr><td><code>set_item_default_focus</code></td><td><code>imgui_set_item_default_focus_gen</code></td></tr>
+<tr><td><code>set_keyboard_focus_here</code></td><td><code>imgui_set_keyboard_focus_here_gen</code></td></tr>
+<tr><td><code>is_item_hovered</code></td><td><code>imgui_is_item_hovered_gen</code></td></tr>
+<tr><td><code>is_item_active</code></td><td><code>imgui_is_item_active_gen</code></td></tr>
+<tr><td><code>is_item_focused</code></td><td><code>imgui_is_item_focused_gen</code></td></tr>
+<tr><td><code>is_item_clicked</code></td><td><code>imgui_is_item_clicked_gen</code></td></tr>
+<tr><td><code>is_item_visible</code></td><td><code>imgui_is_item_visible_gen</code></td></tr>
+<tr><td><code>is_item_edited</code></td><td><code>imgui_is_item_edited_gen</code></td></tr>
+<tr><td><code>is_item_activated</code></td><td><code>imgui_is_item_activated_gen</code></td></tr>
+<tr><td><code>is_item_deactivated</code></td><td><code>imgui_is_item_deactivated_gen</code></td></tr>
+<tr><td><code>is_item_deactivated_after_edit</code></td><td><code>imgui_is_item_deactivated_after_edit_gen</code></td></tr>
+<tr><td><code>is_item_toggled_open</code></td><td><code>imgui_is_item_toggled_open_gen</code></td></tr>
+<tr><td><code>is_any_item_hovered</code></td><td><code>imgui_is_any_item_hovered_gen</code></td></tr>
+<tr><td><code>is_any_item_active</code></td><td><code>imgui_is_any_item_active_gen</code></td></tr>
+<tr><td><code>is_any_item_focused</code></td><td><code>imgui_is_any_item_focused_gen</code></td></tr>
+<tr><td><code>get_item_rect_min</code></td><td><code>imgui_get_item_rect_min_gen</code></td></tr>
+<tr><td><code>get_item_rect_max</code></td><td><code>imgui_get_item_rect_max_gen</code></td></tr>
+<tr><td><code>get_item_rect_size</code></td><td><code>imgui_get_item_rect_size_gen</code></td></tr>
+<tr><td><code>set_item_allow_overlap</code></td><td><code>imgui_set_item_allow_overlap_gen</code></td></tr>
+<tr><td><code>is_rect_visible</code></td><td><code>imgui_is_rect_visible_gen</code></td></tr>
+<tr><td><code>get_time</code></td><td><code>imgui_get_time_gen</code></td></tr>
+<tr><td><code>get_frame_count</code></td><td><code>imgui_get_frame_count_gen</code></td></tr>
+<tr><td><code>get_style_color_name</code></td><td><code>imgui_get_style_color_name_gen</code></td></tr>
+<tr><td><code>calc_list_clipping</code></td><td><code>imgui_calc_list_clipping_gen</code></td></tr>
+<tr><td><code>begin_child_frame</code></td><td><code>imgui_begin_child_frame_gen</code></td></tr>
+<tr><td><code>end_child_frame</code></td><td><code>imgui_end_child_frame_gen</code></td></tr>
+<tr><td><code>calc_text_size</code></td><td><code>imgui_calc_text_size_gen</code></td></tr>
+<tr><td><code>color_convert_u32_to_float4</code></td><td><code>imgui_color_convert_u32_to_float4_gen</code></td></tr>
+<tr><td><code>color_convert_float4_to_u32</code></td><td><code>imgui_color_convert_float4_to_u32_gen</code></td></tr>
+<tr><td><code>color_convert_rg_bto_hsv</code></td><td><code>imgui_color_convert_rg_bto_hsv_gen</code></td></tr>
+<tr><td><code>color_convert_hs_vto_rgb</code></td><td><code>imgui_color_convert_hs_vto_rgb_gen</code></td></tr>
+<tr><td><code>get_key_index</code></td><td><code>imgui_get_key_index_gen</code></td></tr>
+<tr><td><code>is_key_down</code></td><td><code>imgui_is_key_down_gen</code></td></tr>
+<tr><td><code>is_key_pressed</code></td><td><code>imgui_is_key_pressed_gen</code></td></tr>
+<tr><td><code>is_key_released</code></td><td><code>imgui_is_key_released_gen</code></td></tr>
+<tr><td><code>get_key_pressed_amount</code></td><td><code>imgui_get_key_pressed_amount_gen</code></td></tr>
+<tr><td><code>capture_keyboard_from_app</code></td><td><code>imgui_capture_keyboard_from_app_gen</code></td></tr>
+<tr><td><code>is_mouse_down</code></td><td><code>imgui_is_mouse_down_gen</code></td></tr>
+<tr><td><code>is_mouse_clicked</code></td><td><code>imgui_is_mouse_clicked_gen</code></td></tr>
+<tr><td><code>is_mouse_released</code></td><td><code>imgui_is_mouse_released_gen</code></td></tr>
+<tr><td><code>is_mouse_double_clicked</code></td><td><code>imgui_is_mouse_double_clicked_gen</code></td></tr>
+<tr><td><code>is_mouse_hovering_rect</code></td><td><code>imgui_is_mouse_hovering_rect_gen</code></td></tr>
+<tr><td><code>is_any_mouse_down</code></td><td><code>imgui_is_any_mouse_down_gen</code></td></tr>
+<tr><td><code>get_mouse_pos</code></td><td><code>imgui_get_mouse_pos_gen</code></td></tr>
+<tr><td><code>get_mouse_pos_on_opening_current_popup</code></td><td><code>imgui_get_mouse_pos_on_opening_current_popup_gen</code></td></tr>
+<tr><td><code>is_mouse_dragging</code></td><td><code>imgui_is_mouse_dragging_gen</code></td></tr>
+<tr><td><code>get_mouse_drag_delta</code></td><td><code>imgui_get_mouse_drag_delta_gen</code></td></tr>
+<tr><td><code>reset_mouse_drag_delta</code></td><td><code>imgui_reset_mouse_drag_delta_gen</code></td></tr>
+<tr><td><code>get_mouse_cursor</code></td><td><code>imgui_get_mouse_cursor_gen</code></td></tr>
+<tr><td><code>set_mouse_cursor</code></td><td><code>imgui_set_mouse_cursor_gen</code></td></tr>
+<tr><td><code>capture_mouse_from_app</code></td><td><code>imgui_capture_mouse_from_app_gen</code></td></tr>
+<tr><td><code>get_clipboard_text</code></td><td><code>imgui_get_clipboard_text_gen</code></td></tr>
+<tr><td><code>set_clipboard_text</code></td><td><code>imgui_set_clipboard_text_gen</code></td></tr>
+<tr><td><code>load_ini_settings_from_disk</code></td><td><code>imgui_load_ini_settings_from_disk_gen</code></td></tr>
+<tr><td><code>load_ini_settings_from_memory</code></td><td><code>imgui_load_ini_settings_from_memory_gen</code></td></tr>
+<tr><td><code>save_ini_settings_to_disk</code></td><td><code>imgui_save_ini_settings_to_disk_gen</code></td></tr>
+<tr><td><code>save_ini_settings_to_memory</code></td><td><code>imgui_save_ini_settings_to_memory_gen</code></td></tr>
+<tr><td><code>debug_check_version_and_data_layout</code></td><td><code>imgui_debug_check_version_and_data_layout_gen</code></td></tr>
+<tr><td><code>list_box_header</code></td><td><code>imgui_list_box_header_gen</code></td></tr>
+<tr><td><code>push_clip_rect_full_screen</code></td><td><code>imgui_push_clip_rect_full_screen_gen</code></td></tr>
+<tr><td><code>push_texture_id</code></td><td><code>imgui_push_texture_id_gen</code></td></tr>
+<tr><td><code>pop_texture_id</code></td><td><code>imgui_pop_texture_id_gen</code></td></tr>
+<tr><td><code>add_line</code></td><td><code>imgui_add_line_gen</code></td></tr>
+<tr><td><code>add_rect</code></td><td><code>imgui_add_rect_gen</code></td></tr>
+<tr><td><code>add_rect_filled</code></td><td><code>imgui_add_rect_filled_gen</code></td></tr>
+<tr><td><code>add_rect_filled_multi_color</code></td><td><code>imgui_add_rect_filled_multi_color_gen</code></td></tr>
+<tr><td><code>add_quad</code></td><td><code>imgui_add_quad_gen</code></td></tr>
+<tr><td><code>add_quad_filled</code></td><td><code>imgui_add_quad_filled_gen</code></td></tr>
+<tr><td><code>add_triangle</code></td><td><code>imgui_add_triangle_gen</code></td></tr>
+<tr><td><code>add_triangle_filled</code></td><td><code>imgui_add_triangle_filled_gen</code></td></tr>
+<tr><td><code>add_circle</code></td><td><code>imgui_add_circle_gen</code></td></tr>
+<tr><td><code>add_circle_filled</code></td><td><code>imgui_add_circle_filled_gen</code></td></tr>
+<tr><td><code>add_ngon</code></td><td><code>imgui_add_ngon_gen</code></td></tr>
+<tr><td><code>add_ngon_filled</code></td><td><code>imgui_add_ngon_filled_gen</code></td></tr>
+<tr><td><code>add_text</code></td><td><code>imgui_add_text_gen</code></td></tr>
+<tr><td><code>add_bezier_cubic</code></td><td><code>imgui_add_bezier_cubic_gen</code></td></tr>
+<tr><td><code>add_bezier_quadratic</code></td><td><code>imgui_add_bezier_quadratic_gen</code></td></tr>
+<tr><td><code>add_image</code></td><td><code>imgui_add_image_gen</code></td></tr>
+<tr><td><code>add_image_quad</code></td><td><code>imgui_add_image_quad_gen</code></td></tr>
+<tr><td><code>add_image_rounded</code></td><td><code>imgui_add_image_rounded_gen</code></td></tr>
+<tr><td><code>path_arc_to</code></td><td><code>imgui_path_arc_to_gen</code></td></tr>
+<tr><td><code>path_arc_to_fast</code></td><td><code>imgui_path_arc_to_fast_gen</code></td></tr>
+<tr><td><code>path_bezier_cubic_curve_to</code></td><td><code>imgui_path_bezier_cubic_curve_to_gen</code></td></tr>
+<tr><td><code>path_bezier_quadratic_curve_to</code></td><td><code>imgui_path_bezier_quadratic_curve_to_gen</code></td></tr>
+<tr><td><code>path_rect</code></td><td><code>imgui_path_rect_gen</code></td></tr>
+<tr><td><code>add_draw_cmd</code></td><td><code>imgui_add_draw_cmd_gen</code></td></tr>
+<tr><td><code>prim_reserve</code></td><td><code>imgui_prim_reserve_gen</code></td></tr>
+<tr><td><code>prim_unreserve</code></td><td><code>imgui_prim_unreserve_gen</code></td></tr>
+<tr><td><code>prim_rect</code></td><td><code>imgui_prim_rect_gen</code></td></tr>
+<tr><td><code>prim_rect_uv</code></td><td><code>imgui_prim_rect_uv_gen</code></td></tr>
+<tr><td><code>prim_quad_uv</code></td><td><code>imgui_prim_quad_uv_gen</code></td></tr>
+<tr><td><code>get_global_vars</code></td><td><code>get_global_vars</code></td></tr>
+<tr><td><code>memory_read_bool</code></td><td><code>memory_read_bool</code></td></tr>
+<tr><td><code>set_watermark_text</code></td><td><code>set_watermark_text</code></td></tr>
+<tr><td><code>get_watermark_text</code></td><td><code>get_watermark_text</code></td></tr>
+</table>
+<h2>Global Values (lua_setglobal) <span class="tag">(74)</span></h2>
+<ul><li><code>ProcBind</code></li><li><code>ffi</code></li><li><code>trace</code></li><li><code>trace_mask</code></li><li><code>contents</code></li><li><code>hitgroup</code></li><li><code>Interface</code></li><li><code>get_global_vars</code></li><li><code>client</code></li><li><code>debug_overlay</code></li><li><code>model_info</code></li><li><code>bone_flags</code></li><li><code>structs</code></li><li><code>events</code></li><li><code>file</code></li><li><code>windows</code></li><li><code>audio</code></li><li><code>playsound</code></li><li><code>material_system</code></li><li><code>menu</code></li><li><code>entity</code></li><li><code>dpi</code></li><li><code>render</code></li><li><code>draw</code></li><li><code>cvar_vars</code></li><li><code>fonts</code></li><li><code>text_align</code></li><li><code>memory_read_bool</code></li><li><code>memory</code></li><li><code>modules</code></li><li><code>hooks</code></li><li><code>hook_status</code></li><li><code>utils</code></li><li><code>materials</code></li><li><code>material_flags</code></li><li><code>input</code></li><li><code>keys</code></li><li><code>vector</code></li><li><code>set_watermark_text</code></li><li><code>get_watermark_text</code></li><li><code>imgui</code></li><li><code>image</code></li><li><code>buttons</code></li><li><code>team</code></li><li><code>zombie_class</code></li><li><code>class_id</code></li><li><code>client_class</code></li><li><code>weapon_id</code></li><li><code>frame_stage</code></li><li><code>move_type</code></li><li><code>material_var_type</code></li><li><code>image_format</code></li><li><code>solid_flags</code></li><li><code>entity_effects</code></li><li><code>entity_flags</code></li><li><code>input_buttons</code></li><li><code>studio_flags</code></li><li><code>stencil_op</code></li><li><code>stencil_compare</code></li><li><code>light_type</code></li><li><code>cull_mode</code></li><li><code>fog_mode</code></li><li><code>texture_flags</code></li><li><code>override_type</code></li><li><code>observer_mode</code></li><li><code>life_state</code></li><li><code>chat</code></li><li><code>engine</code></li><li><code>netadr</code></li><li><code>flow</code></li><li><code>cvar</code></li><li><code>cvar_flags</code></li><li><code>fog</code></li><li><code>__SCRIPT_NAME__</code></li></ul>
+<h2>ImGui Functions <span class="tag">(256)</span></h2>
+<table><tr><th>Lua name</th><th>C++ implementation</th></tr>
+<tr><td><code>add_bezier_cubic</code></td><td><code>imgui_add_bezier_cubic_gen</code></td></tr>
+<tr><td><code>add_bezier_quadratic</code></td><td><code>imgui_add_bezier_quadratic_gen</code></td></tr>
+<tr><td><code>add_circle</code></td><td><code>imgui_add_circle_gen</code></td></tr>
+<tr><td><code>add_circle_filled</code></td><td><code>imgui_add_circle_filled_gen</code></td></tr>
+<tr><td><code>add_draw_cmd</code></td><td><code>imgui_add_draw_cmd_gen</code></td></tr>
+<tr><td><code>add_image</code></td><td><code>imgui_add_image_gen</code></td></tr>
+<tr><td><code>add_image_quad</code></td><td><code>imgui_add_image_quad_gen</code></td></tr>
+<tr><td><code>add_image_rounded</code></td><td><code>imgui_add_image_rounded_gen</code></td></tr>
+<tr><td><code>add_line</code></td><td><code>imgui_add_line_gen</code></td></tr>
+<tr><td><code>add_ngon</code></td><td><code>imgui_add_ngon_gen</code></td></tr>
+<tr><td><code>add_ngon_filled</code></td><td><code>imgui_add_ngon_filled_gen</code></td></tr>
+<tr><td><code>add_quad</code></td><td><code>imgui_add_quad_gen</code></td></tr>
+<tr><td><code>add_quad_filled</code></td><td><code>imgui_add_quad_filled_gen</code></td></tr>
+<tr><td><code>add_rect</code></td><td><code>imgui_add_rect_gen</code></td></tr>
+<tr><td><code>add_rect_filled</code></td><td><code>imgui_add_rect_filled_gen</code></td></tr>
+<tr><td><code>add_rect_filled_multi_color</code></td><td><code>imgui_add_rect_filled_multi_color_gen</code></td></tr>
+<tr><td><code>add_text</code></td><td><code>imgui_add_text_gen</code></td></tr>
+<tr><td><code>add_triangle</code></td><td><code>imgui_add_triangle_gen</code></td></tr>
+<tr><td><code>add_triangle_filled</code></td><td><code>imgui_add_triangle_filled_gen</code></td></tr>
+<tr><td><code>align_text_to_frame_padding</code></td><td><code>imgui_align_text_to_frame_padding_gen</code></td></tr>
+<tr><td><code>arrow_button</code></td><td><code>imgui_arrow_button_gen</code></td></tr>
+<tr><td><code>begin_child_frame</code></td><td><code>imgui_begin_child_frame_gen</code></td></tr>
+<tr><td><code>begin_combo</code></td><td><code>imgui_begin_combo_gen</code></td></tr>
+<tr><td><code>begin_drag_drop_source</code></td><td><code>imgui_begin_drag_drop_source_gen</code></td></tr>
+<tr><td><code>begin_drag_drop_target</code></td><td><code>imgui_begin_drag_drop_target_gen</code></td></tr>
+<tr><td><code>begin_group</code></td><td><code>imgui_begin_group_gen</code></td></tr>
+<tr><td><code>begin_list_box</code></td><td><code>imgui_begin_list_box_gen</code></td></tr>
+<tr><td><code>begin_main_menu_bar</code></td><td><code>imgui_begin_main_menu_bar_gen</code></td></tr>
+<tr><td><code>begin_menu</code></td><td><code>imgui_begin_menu_gen</code></td></tr>
+<tr><td><code>begin_menu_bar</code></td><td><code>imgui_begin_menu_bar_gen</code></td></tr>
+<tr><td><code>begin_popup</code></td><td><code>imgui_begin_popup_gen</code></td></tr>
+<tr><td><code>begin_popup_context_item</code></td><td><code>imgui_begin_popup_context_item_gen</code></td></tr>
+<tr><td><code>begin_popup_context_void</code></td><td><code>imgui_begin_popup_context_void_gen</code></td></tr>
+<tr><td><code>begin_popup_context_window</code></td><td><code>imgui_begin_popup_context_window_gen</code></td></tr>
+<tr><td><code>begin_popup_modal</code></td><td><code>imgui_begin_popup_modal_gen</code></td></tr>
+<tr><td><code>begin_tab_bar</code></td><td><code>imgui_begin_tab_bar_gen</code></td></tr>
+<tr><td><code>begin_tab_item</code></td><td><code>imgui_begin_tab_item_gen</code></td></tr>
+<tr><td><code>begin_table</code></td><td><code>imgui_begin_table_gen</code></td></tr>
+<tr><td><code>begin_tooltip</code></td><td><code>imgui_begin_tooltip_gen</code></td></tr>
+<tr><td><code>bullet</code></td><td><code>imgui_bullet_gen</code></td></tr>
+<tr><td><code>calc_item_width</code></td><td><code>imgui_calc_item_width_gen</code></td></tr>
+<tr><td><code>calc_list_clipping</code></td><td><code>imgui_calc_list_clipping_gen</code></td></tr>
+<tr><td><code>calc_text_size</code></td><td><code>imgui_calc_text_size_gen</code></td></tr>
+<tr><td><code>capture_keyboard_from_app</code></td><td><code>imgui_capture_keyboard_from_app_gen</code></td></tr>
+<tr><td><code>capture_mouse_from_app</code></td><td><code>imgui_capture_mouse_from_app_gen</code></td></tr>
+<tr><td><code>checkbox_flags</code></td><td><code>imgui_checkbox_flags_gen</code></td></tr>
+<tr><td><code>close_current_popup</code></td><td><code>imgui_close_current_popup_gen</code></td></tr>
+<tr><td><code>collapsing_header</code></td><td><code>imgui_collapsing_header_gen</code></td></tr>
+<tr><td><code>color_button</code></td><td><code>imgui_color_button_gen</code></td></tr>
+<tr><td><code>color_convert_float4_to_u32</code></td><td><code>imgui_color_convert_float4_to_u32_gen</code></td></tr>
+<tr><td><code>color_convert_hs_vto_rgb</code></td><td><code>imgui_color_convert_hs_vto_rgb_gen</code></td></tr>
+<tr><td><code>color_convert_rg_bto_hsv</code></td><td><code>imgui_color_convert_rg_bto_hsv_gen</code></td></tr>
+<tr><td><code>color_convert_u32_to_float4</code></td><td><code>imgui_color_convert_u32_to_float4_gen</code></td></tr>
+<tr><td><code>debug_check_version_and_data_layout</code></td><td><code>imgui_debug_check_version_and_data_layout_gen</code></td></tr>
+<tr><td><code>drag_float</code></td><td><code>imgui_drag_float_gen</code></td></tr>
+<tr><td><code>drag_float_range2</code></td><td><code>imgui_drag_float_range2_gen</code></td></tr>
+<tr><td><code>drag_int</code></td><td><code>imgui_drag_int_gen</code></td></tr>
+<tr><td><code>drag_int_range2</code></td><td><code>imgui_drag_int_range2_gen</code></td></tr>
+<tr><td><code>dummy</code></td><td><code>imgui_dummy_gen</code></td></tr>
+<tr><td><code>end_child_frame</code></td><td><code>imgui_end_child_frame_gen</code></td></tr>
+<tr><td><code>end_combo</code></td><td><code>imgui_end_combo_gen</code></td></tr>
+<tr><td><code>end_drag_drop_source</code></td><td><code>imgui_end_drag_drop_source_gen</code></td></tr>
+<tr><td><code>end_drag_drop_target</code></td><td><code>imgui_end_drag_drop_target_gen</code></td></tr>
+<tr><td><code>end_frame</code></td><td><code>imgui_end_frame_gen</code></td></tr>
+<tr><td><code>end_group</code></td><td><code>imgui_end_group_gen</code></td></tr>
+<tr><td><code>end_list_box</code></td><td><code>imgui_end_list_box_gen</code></td></tr>
+<tr><td><code>end_main_menu_bar</code></td><td><code>imgui_end_main_menu_bar_gen</code></td></tr>
+<tr><td><code>end_menu</code></td><td><code>imgui_end_menu_gen</code></td></tr>
+<tr><td><code>end_menu_bar</code></td><td><code>imgui_end_menu_bar_gen</code></td></tr>
+<tr><td><code>end_popup</code></td><td><code>imgui_end_popup_gen</code></td></tr>
+<tr><td><code>end_tab_bar</code></td><td><code>imgui_end_tab_bar_gen</code></td></tr>
+<tr><td><code>end_tab_item</code></td><td><code>imgui_end_tab_item_gen</code></td></tr>
+<tr><td><code>end_table</code></td><td><code>imgui_end_table_gen</code></td></tr>
+<tr><td><code>end_tooltip</code></td><td><code>imgui_end_tooltip_gen</code></td></tr>
+<tr><td><code>get_clipboard_text</code></td><td><code>imgui_get_clipboard_text_gen</code></td></tr>
+<tr><td><code>get_color_u32</code></td><td><code>imgui_get_color_u32_gen</code></td></tr>
+<tr><td><code>get_column_offset</code></td><td><code>imgui_get_column_offset_gen</code></td></tr>
+<tr><td><code>get_column_width</code></td><td><code>imgui_get_column_width_gen</code></td></tr>
+<tr><td><code>get_columns_count</code></td><td><code>imgui_get_columns_count_gen</code></td></tr>
+<tr><td><code>get_content_region_avail</code></td><td><code>imgui_get_content_region_avail_gen</code></td></tr>
+<tr><td><code>get_content_region_max</code></td><td><code>imgui_get_content_region_max_gen</code></td></tr>
+<tr><td><code>get_cursor_pos</code></td><td><code>imgui_get_cursor_pos_gen</code></td></tr>
+<tr><td><code>get_cursor_pos_x</code></td><td><code>imgui_get_cursor_pos_x_gen</code></td></tr>
+<tr><td><code>get_cursor_pos_y</code></td><td><code>imgui_get_cursor_pos_y_gen</code></td></tr>
+<tr><td><code>get_cursor_screen_pos</code></td><td><code>imgui_get_cursor_screen_pos_gen</code></td></tr>
+<tr><td><code>get_cursor_start_pos</code></td><td><code>imgui_get_cursor_start_pos_gen</code></td></tr>
+<tr><td><code>get_font_size</code></td><td><code>imgui_get_font_size_gen</code></td></tr>
+<tr><td><code>get_font_tex_uv_white_pixel</code></td><td><code>imgui_get_font_tex_uv_white_pixel_gen</code></td></tr>
+<tr><td><code>get_frame_count</code></td><td><code>imgui_get_frame_count_gen</code></td></tr>
+<tr><td><code>get_frame_height</code></td><td><code>imgui_get_frame_height_gen</code></td></tr>
+<tr><td><code>get_frame_height_with_spacing</code></td><td><code>imgui_get_frame_height_with_spacing_gen</code></td></tr>
+<tr><td><code>get_id</code></td><td><code>imgui_get_id_gen</code></td></tr>
+<tr><td><code>get_item_rect_max</code></td><td><code>imgui_get_item_rect_max_gen</code></td></tr>
+<tr><td><code>get_item_rect_min</code></td><td><code>imgui_get_item_rect_min_gen</code></td></tr>
+<tr><td><code>get_item_rect_size</code></td><td><code>imgui_get_item_rect_size_gen</code></td></tr>
+<tr><td><code>get_key_index</code></td><td><code>imgui_get_key_index_gen</code></td></tr>
+<tr><td><code>get_key_pressed_amount</code></td><td><code>imgui_get_key_pressed_amount_gen</code></td></tr>
+<tr><td><code>get_mouse_cursor</code></td><td><code>imgui_get_mouse_cursor_gen</code></td></tr>
+<tr><td><code>get_mouse_drag_delta</code></td><td><code>imgui_get_mouse_drag_delta_gen</code></td></tr>
+<tr><td><code>get_mouse_pos</code></td><td><code>imgui_get_mouse_pos_gen</code></td></tr>
+<tr><td><code>get_mouse_pos_on_opening_current_popup</code></td><td><code>imgui_get_mouse_pos_on_opening_current_popup_gen</code></td></tr>
+<tr><td><code>get_scroll_max_x</code></td><td><code>imgui_get_scroll_max_x_gen</code></td></tr>
+<tr><td><code>get_scroll_max_y</code></td><td><code>imgui_get_scroll_max_y_gen</code></td></tr>
+<tr><td><code>get_scroll_x</code></td><td><code>imgui_get_scroll_x_gen</code></td></tr>
+<tr><td><code>get_scroll_y</code></td><td><code>imgui_get_scroll_y_gen</code></td></tr>
+<tr><td><code>get_style_color_name</code></td><td><code>imgui_get_style_color_name_gen</code></td></tr>
+<tr><td><code>get_style_color_vec4</code></td><td><code>imgui_get_style_color_vec4_gen</code></td></tr>
+<tr><td><code>get_text_line_height</code></td><td><code>imgui_get_text_line_height_gen</code></td></tr>
+<tr><td><code>get_text_line_height_with_spacing</code></td><td><code>imgui_get_text_line_height_with_spacing_gen</code></td></tr>
+<tr><td><code>get_time</code></td><td><code>imgui_get_time_gen</code></td></tr>
+<tr><td><code>get_tree_node_to_label_spacing</code></td><td><code>imgui_get_tree_node_to_label_spacing_gen</code></td></tr>
+<tr><td><code>get_version</code></td><td><code>imgui_get_version_gen</code></td></tr>
+<tr><td><code>get_window_content_region_max</code></td><td><code>imgui_get_window_content_region_max_gen</code></td></tr>
+<tr><td><code>get_window_content_region_min</code></td><td><code>imgui_get_window_content_region_min_gen</code></td></tr>
+<tr><td><code>get_window_content_region_width</code></td><td><code>imgui_get_window_content_region_width_gen</code></td></tr>
+<tr><td><code>get_window_height</code></td><td><code>imgui_get_window_height_gen</code></td></tr>
+<tr><td><code>get_window_pos</code></td><td><code>imgui_get_window_pos_gen</code></td></tr>
+<tr><td><code>get_window_size</code></td><td><code>imgui_get_window_size_gen</code></td></tr>
+<tr><td><code>get_window_width</code></td><td><code>imgui_get_window_width_gen</code></td></tr>
+<tr><td><code>indent</code></td><td><code>imgui_indent_gen</code></td></tr>
+<tr><td><code>input_double</code></td><td><code>imgui_input_double_gen</code></td></tr>
+<tr><td><code>input_float</code></td><td><code>imgui_input_float_gen</code></td></tr>
+<tr><td><code>input_int</code></td><td><code>imgui_input_int_gen</code></td></tr>
+<tr><td><code>invisible_button</code></td><td><code>imgui_invisible_button_gen</code></td></tr>
+<tr><td><code>is_any_item_active</code></td><td><code>imgui_is_any_item_active_gen</code></td></tr>
+<tr><td><code>is_any_item_focused</code></td><td><code>imgui_is_any_item_focused_gen</code></td></tr>
+<tr><td><code>is_any_item_hovered</code></td><td><code>imgui_is_any_item_hovered_gen</code></td></tr>
+<tr><td><code>is_any_mouse_down</code></td><td><code>imgui_is_any_mouse_down_gen</code></td></tr>
+<tr><td><code>is_item_activated</code></td><td><code>imgui_is_item_activated_gen</code></td></tr>
+<tr><td><code>is_item_active</code></td><td><code>imgui_is_item_active_gen</code></td></tr>
+<tr><td><code>is_item_clicked</code></td><td><code>imgui_is_item_clicked_gen</code></td></tr>
+<tr><td><code>is_item_deactivated</code></td><td><code>imgui_is_item_deactivated_gen</code></td></tr>
+<tr><td><code>is_item_deactivated_after_edit</code></td><td><code>imgui_is_item_deactivated_after_edit_gen</code></td></tr>
+<tr><td><code>is_item_edited</code></td><td><code>imgui_is_item_edited_gen</code></td></tr>
+<tr><td><code>is_item_focused</code></td><td><code>imgui_is_item_focused_gen</code></td></tr>
+<tr><td><code>is_item_hovered</code></td><td><code>imgui_is_item_hovered_gen</code></td></tr>
+<tr><td><code>is_item_toggled_open</code></td><td><code>imgui_is_item_toggled_open_gen</code></td></tr>
+<tr><td><code>is_item_visible</code></td><td><code>imgui_is_item_visible_gen</code></td></tr>
+<tr><td><code>is_key_down</code></td><td><code>imgui_is_key_down_gen</code></td></tr>
+<tr><td><code>is_key_pressed</code></td><td><code>imgui_is_key_pressed_gen</code></td></tr>
+<tr><td><code>is_key_released</code></td><td><code>imgui_is_key_released_gen</code></td></tr>
+<tr><td><code>is_mouse_clicked</code></td><td><code>imgui_is_mouse_clicked_gen</code></td></tr>
+<tr><td><code>is_mouse_double_clicked</code></td><td><code>imgui_is_mouse_double_clicked_gen</code></td></tr>
+<tr><td><code>is_mouse_down</code></td><td><code>imgui_is_mouse_down_gen</code></td></tr>
+<tr><td><code>is_mouse_dragging</code></td><td><code>imgui_is_mouse_dragging_gen</code></td></tr>
+<tr><td><code>is_mouse_hovering_rect</code></td><td><code>imgui_is_mouse_hovering_rect_gen</code></td></tr>
+<tr><td><code>is_mouse_released</code></td><td><code>imgui_is_mouse_released_gen</code></td></tr>
+<tr><td><code>is_popup_open</code></td><td><code>imgui_is_popup_open_gen</code></td></tr>
+<tr><td><code>is_rect_visible</code></td><td><code>imgui_is_rect_visible_gen</code></td></tr>
+<tr><td><code>is_window_appearing</code></td><td><code>imgui_is_window_appearing_gen</code></td></tr>
+<tr><td><code>is_window_collapsed</code></td><td><code>imgui_is_window_collapsed_gen</code></td></tr>
+<tr><td><code>is_window_focused</code></td><td><code>imgui_is_window_focused_gen</code></td></tr>
+<tr><td><code>is_window_hovered</code></td><td><code>imgui_is_window_hovered_gen</code></td></tr>
+<tr><td><code>list_box_header</code></td><td><code>imgui_list_box_header_gen</code></td></tr>
+<tr><td><code>load_ini_settings_from_disk</code></td><td><code>imgui_load_ini_settings_from_disk_gen</code></td></tr>
+<tr><td><code>load_ini_settings_from_memory</code></td><td><code>imgui_load_ini_settings_from_memory_gen</code></td></tr>
+<tr><td><code>log_buttons</code></td><td><code>imgui_log_buttons_gen</code></td></tr>
+<tr><td><code>log_finish</code></td><td><code>imgui_log_finish_gen</code></td></tr>
+<tr><td><code>log_to_clipboard</code></td><td><code>imgui_log_to_clipboard_gen</code></td></tr>
+<tr><td><code>log_to_file</code></td><td><code>imgui_log_to_file_gen</code></td></tr>
+<tr><td><code>log_to_tty</code></td><td><code>imgui_log_to_tty_gen</code></td></tr>
+<tr><td><code>menu_item</code></td><td><code>imgui_menu_item_gen</code></td></tr>
+<tr><td><code>new_frame</code></td><td><code>imgui_new_frame_gen</code></td></tr>
+<tr><td><code>open_popup</code></td><td><code>imgui_open_popup_gen</code></td></tr>
+<tr><td><code>open_popup_on_item_click</code></td><td><code>imgui_open_popup_on_item_click_gen</code></td></tr>
+<tr><td><code>path_arc_to</code></td><td><code>imgui_path_arc_to_gen</code></td></tr>
+<tr><td><code>path_arc_to_fast</code></td><td><code>imgui_path_arc_to_fast_gen</code></td></tr>
+<tr><td><code>path_bezier_cubic_curve_to</code></td><td><code>imgui_path_bezier_cubic_curve_to_gen</code></td></tr>
+<tr><td><code>path_bezier_quadratic_curve_to</code></td><td><code>imgui_path_bezier_quadratic_curve_to_gen</code></td></tr>
+<tr><td><code>path_rect</code></td><td><code>imgui_path_rect_gen</code></td></tr>
+<tr><td><code>plot_histogram</code></td><td><code>imgui_plot_histogram_gen</code></td></tr>
+<tr><td><code>plot_lines</code></td><td><code>imgui_plot_lines_gen</code></td></tr>
+<tr><td><code>pop_allow_keyboard_focus</code></td><td><code>imgui_pop_allow_keyboard_focus_gen</code></td></tr>
+<tr><td><code>pop_button_repeat</code></td><td><code>imgui_pop_button_repeat_gen</code></td></tr>
+<tr><td><code>pop_clip_rect</code></td><td><code>imgui_pop_clip_rect_gen</code></td></tr>
+<tr><td><code>pop_font</code></td><td><code>imgui_pop_font_gen</code></td></tr>
+<tr><td><code>pop_id</code></td><td><code>imgui_pop_id_gen</code></td></tr>
+<tr><td><code>pop_style_var</code></td><td><code>imgui_pop_style_var_gen</code></td></tr>
+<tr><td><code>pop_text_wrap_pos</code></td><td><code>imgui_pop_text_wrap_pos_gen</code></td></tr>
+<tr><td><code>pop_texture_id</code></td><td><code>imgui_pop_texture_id_gen</code></td></tr>
+<tr><td><code>prim_quad_uv</code></td><td><code>imgui_prim_quad_uv_gen</code></td></tr>
+<tr><td><code>prim_rect</code></td><td><code>imgui_prim_rect_gen</code></td></tr>
+<tr><td><code>prim_rect_uv</code></td><td><code>imgui_prim_rect_uv_gen</code></td></tr>
+<tr><td><code>prim_reserve</code></td><td><code>imgui_prim_reserve_gen</code></td></tr>
+<tr><td><code>prim_unreserve</code></td><td><code>imgui_prim_unreserve_gen</code></td></tr>
+<tr><td><code>progress_bar</code></td><td><code>imgui_progress_bar_gen</code></td></tr>
+<tr><td><code>push_allow_keyboard_focus</code></td><td><code>imgui_push_allow_keyboard_focus_gen</code></td></tr>
+<tr><td><code>push_button_repeat</code></td><td><code>imgui_push_button_repeat_gen</code></td></tr>
+<tr><td><code>push_clip_rect</code></td><td><code>imgui_push_clip_rect_gen</code></td></tr>
+<tr><td><code>push_clip_rect_full_screen</code></td><td><code>imgui_push_clip_rect_full_screen_gen</code></td></tr>
+<tr><td><code>push_id</code></td><td><code>imgui_push_id_gen</code></td></tr>
+<tr><td><code>push_style_var</code></td><td><code>imgui_push_style_var_gen</code></td></tr>
+<tr><td><code>push_text_wrap_pos</code></td><td><code>imgui_push_text_wrap_pos_gen</code></td></tr>
+<tr><td><code>push_texture_id</code></td><td><code>imgui_push_texture_id_gen</code></td></tr>
+<tr><td><code>radio_button</code></td><td><code>imgui_radio_button_gen</code></td></tr>
+<tr><td><code>render</code></td><td><code>imgui_render_gen</code></td></tr>
+<tr><td><code>reset_mouse_drag_delta</code></td><td><code>imgui_reset_mouse_drag_delta_gen</code></td></tr>
+<tr><td><code>save_ini_settings_to_disk</code></td><td><code>imgui_save_ini_settings_to_disk_gen</code></td></tr>
+<tr><td><code>save_ini_settings_to_memory</code></td><td><code>imgui_save_ini_settings_to_memory_gen</code></td></tr>
+<tr><td><code>selectable</code></td><td><code>imgui_selectable_gen</code></td></tr>
+<tr><td><code>set_clipboard_text</code></td><td><code>imgui_set_clipboard_text_gen</code></td></tr>
+<tr><td><code>set_color_edit_options</code></td><td><code>imgui_set_color_edit_options_gen</code></td></tr>
+<tr><td><code>set_column_offset</code></td><td><code>imgui_set_column_offset_gen</code></td></tr>
+<tr><td><code>set_cursor_pos</code></td><td><code>imgui_set_cursor_pos_gen</code></td></tr>
+<tr><td><code>set_cursor_pos_x</code></td><td><code>imgui_set_cursor_pos_x_gen</code></td></tr>
+<tr><td><code>set_cursor_pos_y</code></td><td><code>imgui_set_cursor_pos_y_gen</code></td></tr>
+<tr><td><code>set_cursor_screen_pos</code></td><td><code>imgui_set_cursor_screen_pos_gen</code></td></tr>
+<tr><td><code>set_item_allow_overlap</code></td><td><code>imgui_set_item_allow_overlap_gen</code></td></tr>
+<tr><td><code>set_item_default_focus</code></td><td><code>imgui_set_item_default_focus_gen</code></td></tr>
+<tr><td><code>set_keyboard_focus_here</code></td><td><code>imgui_set_keyboard_focus_here_gen</code></td></tr>
+<tr><td><code>set_mouse_cursor</code></td><td><code>imgui_set_mouse_cursor_gen</code></td></tr>
+<tr><td><code>set_next_item_open</code></td><td><code>imgui_set_next_item_open_gen</code></td></tr>
+<tr><td><code>set_next_item_width</code></td><td><code>imgui_set_next_item_width_gen</code></td></tr>
+<tr><td><code>set_next_window_bg_alpha</code></td><td><code>imgui_set_next_window_bg_alpha_gen</code></td></tr>
+<tr><td><code>set_next_window_collapsed</code></td><td><code>imgui_set_next_window_collapsed_gen</code></td></tr>
+<tr><td><code>set_next_window_content_size</code></td><td><code>imgui_set_next_window_content_size_gen</code></td></tr>
+<tr><td><code>set_next_window_focus</code></td><td><code>imgui_set_next_window_focus_gen</code></td></tr>
+<tr><td><code>set_next_window_size</code></td><td><code>imgui_set_next_window_size_gen</code></td></tr>
+<tr><td><code>set_scroll_from_pos_x</code></td><td><code>imgui_set_scroll_from_pos_x_gen</code></td></tr>
+<tr><td><code>set_scroll_from_pos_y</code></td><td><code>imgui_set_scroll_from_pos_y_gen</code></td></tr>
+<tr><td><code>set_scroll_here_x</code></td><td><code>imgui_set_scroll_here_x_gen</code></td></tr>
+<tr><td><code>set_scroll_here_y</code></td><td><code>imgui_set_scroll_here_y_gen</code></td></tr>
+<tr><td><code>set_scroll_x</code></td><td><code>imgui_set_scroll_x_gen</code></td></tr>
+<tr><td><code>set_scroll_y</code></td><td><code>imgui_set_scroll_y_gen</code></td></tr>
+<tr><td><code>set_tab_item_closed</code></td><td><code>imgui_set_tab_item_closed_gen</code></td></tr>
+<tr><td><code>set_window_collapsed</code></td><td><code>imgui_set_window_collapsed_gen</code></td></tr>
+<tr><td><code>set_window_focus</code></td><td><code>imgui_set_window_focus_gen</code></td></tr>
+<tr><td><code>set_window_pos</code></td><td><code>imgui_set_window_pos_gen</code></td></tr>
+<tr><td><code>set_window_size</code></td><td><code>imgui_set_window_size_gen</code></td></tr>
+<tr><td><code>show_metrics_window</code></td><td><code>imgui_show_metrics_window_gen</code></td></tr>
+<tr><td><code>slider_angle</code></td><td><code>imgui_slider_angle_gen</code></td></tr>
+<tr><td><code>small_button</code></td><td><code>imgui_small_button_gen</code></td></tr>
+<tr><td><code>tab_item_button</code></td><td><code>imgui_tab_item_button_gen</code></td></tr>
+<tr><td><code>table_get_column_count</code></td><td><code>imgui_table_get_column_count_gen</code></td></tr>
+<tr><td><code>table_get_column_flags</code></td><td><code>imgui_table_get_column_flags_gen</code></td></tr>
+<tr><td><code>table_get_column_index</code></td><td><code>imgui_table_get_column_index_gen</code></td></tr>
+<tr><td><code>table_get_column_name</code></td><td><code>imgui_table_get_column_name_gen</code></td></tr>
+<tr><td><code>table_get_row_index</code></td><td><code>imgui_table_get_row_index_gen</code></td></tr>
+<tr><td><code>table_header</code></td><td><code>imgui_table_header_gen</code></td></tr>
+<tr><td><code>table_headers_row</code></td><td><code>imgui_table_headers_row_gen</code></td></tr>
+<tr><td><code>table_next_column</code></td><td><code>imgui_table_next_column_gen</code></td></tr>
+<tr><td><code>table_next_row</code></td><td><code>imgui_table_next_row_gen</code></td></tr>
+<tr><td><code>table_set_bg_color</code></td><td><code>imgui_table_set_bg_color_gen</code></td></tr>
+<tr><td><code>table_set_column_enabled</code></td><td><code>imgui_table_set_column_enabled_gen</code></td></tr>
+<tr><td><code>table_set_column_index</code></td><td><code>imgui_table_set_column_index_gen</code></td></tr>
+<tr><td><code>table_setup_column</code></td><td><code>imgui_table_setup_column_gen</code></td></tr>
+<tr><td><code>table_setup_scroll_freeze</code></td><td><code>imgui_table_setup_scroll_freeze_gen</code></td></tr>
+<tr><td><code>text_unformatted</code></td><td><code>imgui_text_unformatted_gen</code></td></tr>
+<tr><td><code>tree_node</code></td><td><code>imgui_tree_node_gen</code></td></tr>
+<tr><td><code>tree_node_ex</code></td><td><code>imgui_tree_node_ex_gen</code></td></tr>
+<tr><td><code>tree_pop</code></td><td><code>imgui_tree_pop_gen</code></td></tr>
+<tr><td><code>tree_push</code></td><td><code>imgui_tree_push_gen</code></td></tr>
+<tr><td><code>unindent</code></td><td><code>imgui_unindent_gen</code></td></tr>
+<tr><td><code>v_slider_float</code></td><td><code>imgui_v_slider_float_gen</code></td></tr>
+<tr><td><code>v_slider_int</code></td><td><code>imgui_v_slider_int_gen</code></td></tr>
+<tr><td><code>value</code></td><td><code>imgui_value_gen</code></td></tr>
+</table>
+<h2 id="callbacks">Hook Callbacks &mdash; full signatures</h2>
+<p class="hint"><b>No registration required.</b> Define any of these as a global Lua function (<code>function on_end_scene() ... end</code>) and it is called automatically. If you do not define it, the hook does nothing for your script. Names are case-sensitive. <b>Args</b> are what your function receives; <b>Returns</b> are the values the engine reads back (if blank, the return value is ignored).</p>
+<table>
+<tr><th>Lua callback (define this)</th><th>Args</th><th>Returns</th><th>Runs on</th><th>Purpose / notes</th></tr>
+<tr><td><code>on_create_move(cmd, player)</code></td><td><code>cmd</code> USERCMD_META, <code>player</code> entity</td><td>&mdash;</td><td>game (CreateMove)</td><td>Every tick while building the local player's command. Change movement/buttons/viewangles here.</td></tr>
+<tr><td><code>on_create_move_prediction(cmd, player)</code></td><td><code>cmd</code>, <code>player</code></td><td>&mdash;</td><td>game</td><td>Same data as CreateMove but for the prediction pass.</td></tr>
+<tr><td><code>on_paint()</code></td><td>none</td><td>&mdash;</td><td>render (engine paint)</td><td>Engine/HUD paint. <b>ImGui does not work here</b> &mdash; use <code>draw.*</code>.</td></tr>
+<tr><td><code>on_end_scene()</code></td><td>none</td><td>&mdash;</td><td>render (EndScene)</td><td><b>ImGui drawing.</b> Wrap widgets in <code>imgui.begin_window</code> / <code>imgui.end_window</code>.</td></tr>
+<tr><td><code>on_frame_stage_notify_pre(stage)</code></td><td><code>stage</code> int (frame_stage enum)</td><td>&mdash;</td><td>game</td><td>Before a client frame stage.</td></tr>
+<tr><td><code>on_frame_stage_notify_post(stage)</code></td><td><code>stage</code> int</td><td>&mdash;</td><td>game</td><td>After a client frame stage.</td></tr>
+<tr><td><code>on_game_event(name, event)</code></td><td><code>name</code> string, <code>event</code> game event userdata</td><td>&mdash;</td><td>render state</td><td>An engine game event fired. Read fields off <code>event</code>.</td></tr>
+<tr><td><code>on_draw_model_execute(info)</code></td><td><code>info</code> model render info</td><td>&mdash;</td><td>render</td><td>An entity model is about to be drawn.</td></tr>
+<tr><td><code>on_level_init_pre_entity(map)</code></td><td><code>map</code> string</td><td>&mdash;</td><td>game</td><td>Map load started.</td></tr>
+<tr><td><code>on_level_init_post_entity()</code></td><td>none</td><td>&mdash;</td><td>game</td><td>Map entities created.</td></tr>
+<tr><td><code>on_level_shutdown()</code></td><td>none</td><td>&mdash;</td><td>game</td><td>Map unloading.</td></tr>
+<tr><td><code>on_run_command_pre(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>Before a player's command runs.</td></tr>
+<tr><td><code>on_run_command_post(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>After a player's command runs.</td></tr>
+<tr><td><code>on_setup_move_pre(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>Movement setup, before.</td></tr>
+<tr><td><code>on_setup_move_post(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>Movement setup, after.</td></tr>
+<tr><td><code>on_finish_move_pre(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>Finish move, before.</td></tr>
+<tr><td><code>on_finish_move_post(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>Finish move, after.</td></tr>
+<tr><td><code>on_scene_end_pre()</code></td><td>none</td><td>&mdash;</td><td>render</td><td>Before the scene ends.</td></tr>
+<tr><td><code>on_scene_end_post()</code></td><td>none</td><td>&mdash;</td><td>render</td><td>After the scene ends.</td></tr>
+<tr><td><code>on_paint_traverse_pre(panel, name, forceRepaint, allowForce)</code></td><td><code>panel</code> int, <code>name</code> string, <code>forceRepaint</code> bool, <code>allowForce</code> bool</td><td>&mdash;</td><td>render</td><td>VGUI panel paint, before.</td></tr>
+<tr><td><code>on_paint_traverse_post(panel, name, forceRepaint, allowForce)</code></td><td>same as above</td><td>&mdash;</td><td>render</td><td>VGUI panel paint, after.</td></tr>
+<tr><td><code>on_simulate_pre(collection, name)</code></td><td><code>collection</code> particle collection, <code>name</code></td><td>&mdash;</td><td>game</td><td>Particle simulation, before.</td></tr>
+<tr><td><code>on_simulate_post(collection, name)</code></td><td><code>collection</code>, <code>name</code></td><td>&mdash;</td><td>game</td><td>Particle simulation, after.</td></tr>
+<tr><td><code>on_run_command_standalone_pre(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>Standalone RunCommand hook, before.</td></tr>
+<tr><td><code>on_run_command_standalone_post(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>Standalone RunCommand hook, after.</td></tr>
+<tr><td><code>on_process_movement_pre(player, moveData)</code></td><td><code>player</code>, <code>moveData</code></td><td>&mdash;</td><td>game</td><td>ProcessMovement, before.</td></tr>
+<tr><td><code>on_process_movement_post(player, moveData)</code></td><td><code>player</code>, <code>moveData</code></td><td>&mdash;</td><td>game</td><td>ProcessMovement, after.</td></tr>
+<tr><td><code>on_avoid_players_pre(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>AvoidPlayers, before.</td></tr>
+<tr><td><code>on_avoid_players_post(player, cmd)</code></td><td><code>player</code>, <code>cmd</code></td><td>&mdash;</td><td>game</td><td>AvoidPlayers, after.</td></tr>
+<tr><td><code>on_get_fog_color(fog, color)</code></td><td><code>fog</code> table <code>{start, fog_end, max_density}</code>, <code>color</code> table <code>{r,g,b}</code></td><td><code>fog, color</code> (tables)</td><td>render</td><td>Return the (possibly modified) tables to override fog. Returning nothing keeps current values.</td></tr>
+<tr><td><code>on_find_material(name, textureGroup)</code></td><td><code>name</code> string, <code>textureGroup</code> string</td><td><code>string</code> or nil</td><td>game</td><td>Return a replacement material name to override, or nil to leave it.</td></tr>
+<tr><td><code>on_crosshair_hook()</code></td><td>none</td><td><code>boolean</code></td><td>game</td><td>Return <code>true</code> to tell the engine you handled the crosshair (suppresses the default).</td></tr>
+<tr><td><code>on_cl_move_pre()</code></td><td>none</td><td>&mdash;</td><td>game</td><td>Client movement, before.</td></tr>
+<tr><td><code>on_cl_move_post()</code></td><td>none</td><td>&mdash;</td><td>game</td><td>Client movement, after.</td></tr>
+<tr><td><code>on_post_screen_space_effects()</code></td><td>none</td><td>&mdash;</td><td>render</td><td>After post-processing effects.</td></tr>
+<tr><td><code>on_override_view()</code></td><td>none</td><td>&mdash;</td><td>game</td><td>Camera / view override.</td></tr>
+<tr><td><code>on_unload()</code></td><td>none</td><td>&mdash;</td><td>any</td><td>Your script is being unloaded &mdash; clean up here.</td></tr>
+</table>
+<p class="hint">There is no <code>on_</code> callback that returns a table other than <code>on_get_fog_color</code>; the other multi-return style hooks (<code>on_find_material</code>, <code>on_crosshair_hook</code>) return a single value as shown.</p>
+</body></html>
